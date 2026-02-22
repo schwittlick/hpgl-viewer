@@ -22,3 +22,20 @@ executable('hpgl-viewer',
   sources : ['src/main.cpp'],
   dependencies : [glfw_dep, gl_dep, imgui_dep],
   install : true)
+
+# ── Desktop integration ───────────────────────────────────────────────────────
+
+install_data('data/hpgl-viewer.desktop',
+  install_dir : get_option('datadir') / 'applications')
+
+install_data('data/hpgl.xml',
+  install_dir : get_option('datadir') / 'mime/packages')
+
+install_data('data/mimeapps.list',
+  install_dir : get_option('datadir') / 'applications')
+
+meson.add_install_script('sh', '-c',
+  'update-mime-database "$DESTDIR"' + get_option('prefix') / get_option('datadir') / 'mime')
+
+meson.add_install_script('sh', '-c',
+  'update-desktop-database "$DESTDIR"' + get_option('prefix') / get_option('datadir') / 'applications')

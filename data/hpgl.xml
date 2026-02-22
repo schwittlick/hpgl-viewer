@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/vnd.hp-hpgl">
+    <comment>HPGL plotter file</comment>
+    <alias type="application/vnd.hp-HPGL"/>
+    <alias type="application/hp-HPGL"/>
+    <alias type="image/vnd.hp-hpgl"/>
+    <glob pattern="*.hpgl"/>
+    <glob pattern="*.hgl"/>
+    <glob pattern="*.plt"/>
+  </mime-type>
+</mime-info>

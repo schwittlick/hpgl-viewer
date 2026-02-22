@@ -1,0 +1,5 @@
+[Default Applications]
+application/vnd.hp-HPGL=hpgl-viewer.desktop
+application/vnd.hp-hpgl=hpgl-viewer.desktop
+application/hp-HPGL=hpgl-viewer.desktop
+image/vnd.hp-hpgl=hpgl-viewer.desktop

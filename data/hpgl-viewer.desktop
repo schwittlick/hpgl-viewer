@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=HPGL Viewer
+Comment=View HPGL plotter files
+Exec=hpgl-viewer %f
+Type=Application
+MimeType=application/vnd.hp-HPGL;application/vnd.hp-hpgl;application/hp-HPGL;image/vnd.hp-hpgl;
+Categories=Graphics;Viewer;
