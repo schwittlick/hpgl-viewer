@@ -267,7 +267,7 @@ static void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW,
 // ─── Main
 // ─────────────────────────────────────────────────────────────────────
 
-int main() {
+int main(int argc, char** argv) {
   if (!glfwInit())
     return 1;
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -293,6 +293,13 @@ int main() {
   ImGui_ImplOpenGL3_Init("#version 330");
 
   initPenColors();
+
+  if (argc > 1) {
+      g_filePath = argv[1];
+      strncpy(g_filePathBuf, g_filePath.c_str(), sizeof(g_filePathBuf) - 1);
+      g_doc = parseHpgl(g_filePath);
+      g_fitNextFrame = true;
+  }
 
   while (!glfwWindowShouldClose(window)) {
     glfwPollEvents();
