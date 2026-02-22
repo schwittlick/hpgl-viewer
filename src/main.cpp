@@ -184,9 +184,11 @@ HpglDoc parseHpgl(const std::string &path) {
 // ─── App state
 // ────────────────────────────────────────────────────────────────
 
+static constexpr float kHpglUnitsPerMm = 40.0f;
+
 struct PenStyle {
   ImVec4 color = {0.1f, 0.1f, 0.1f, 1.0f};
-  float thickness = 1.5f;
+  float thickness = 0.3f; // mm
 };
 
 static HpglDoc g_doc;
@@ -246,10 +248,13 @@ static void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW,
     ImU32 col = ImGui::ColorConvertFloat4ToU32(g_pens[pi].color);
     float thick = g_pens[pi].thickness;
     
+    // thickness in mm → screen pixels: mm * (HPGL units/mm) * (pixels/HPGL unit)
+    float screen_thick = std::max(1.0f, thick * kHpglUnitsPerMm * g_scale);
+
     if (stroke.points.size() == 2 && stroke.points[0] == stroke.points[1]) {
       float x = origin.x + stroke.points[0].x * g_scale + g_panX;
       float y = origin.y + stroke.points[0].y * g_scale + g_panY;
-      dl->AddCircleFilled({x, y}, thick * 0.5f, col);
+      dl->AddCircleFilled({x, y}, screen_thick * 0.5f, col);
       continue;
     }
 
@@ -258,7 +263,7 @@ static void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW,
       float y0 = origin.y + stroke.points[i].y * g_scale + g_panY;
       float x1 = origin.x + stroke.points[i + 1].x * g_scale + g_panX;
       float y1 = origin.y + stroke.points[i + 1].y * g_scale + g_panY;
-      dl->AddLine({x0, y0}, {x1, y1}, col, thick);
+      dl->AddLine({x0, y0}, {x1, y1}, col, screen_thick);
     }
   }
   dl->PopClipRect();
@@ -351,8 +356,8 @@ int main(int argc, char** argv) {
                             ImGuiColorEditFlags_AlphaBar);
       ImGui::SameLine();
       ImGui::SetNextItemWidth(100);
-      ImGui::SliderFloat("##thick", &g_pens[i].thickness, 0.5f, 8.0f,
-                         "%.1f px");
+      ImGui::SliderFloat("##thick", &g_pens[i].thickness, 0.05f, 2.0f,
+                         "%.2f mm");
       ImGui::PopID();
     }
 
