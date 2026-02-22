@@ -1,4 +1,5 @@
 #include "imgui.h"
+#include "imgui_internal.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 #include <GLFW/glfw3.h>
@@ -269,6 +270,21 @@ static void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW,
   dl->PopClipRect();
 }
 
+// ─── Layout
+// ────────────────────────────────────────────────────────────────────
+
+static void applyDefaultLayout(ImGuiID dockspace_id) {
+  ImGui::DockBuilderRemoveNode(dockspace_id);
+  ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
+  ImGui::DockBuilderSetNodeSize(dockspace_id, ImGui::GetMainViewport()->Size);
+
+  ImGuiID left, right;
+  ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Left, 0.22f, &left, &right);
+  ImGui::DockBuilderDockWindow("Controls", left);
+  ImGui::DockBuilderDockWindow("Canvas", right);
+  ImGui::DockBuilderFinish(dockspace_id);
+}
+
 // ─── Main
 // ─────────────────────────────────────────────────────────────────────
 
@@ -312,9 +328,16 @@ int main(int argc, char** argv) {
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
 
-    // Full-window dockspace
-    ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(),
-                                 ImGuiDockNodeFlags_PassthruCentralNode);
+    // Full-window dockspace — apply default layout on first run (no ini yet)
+    ImGuiID dockspace_id = ImGui::DockSpaceOverViewport(
+        0, ImGui::GetMainViewport(), ImGuiDockNodeFlags_PassthruCentralNode);
+    static bool layout_initialized = false;
+    if (!layout_initialized) {
+      layout_initialized = true;
+      ImGuiDockNode *node = ImGui::DockBuilderGetNode(dockspace_id);
+      if (!node || node->IsLeafNode())
+        applyDefaultLayout(dockspace_id);
+    }
 
     // ── Sidebar ──────────────────────────────────────────────────────────
     ImGui::SetNextWindowSize({320, 600}, ImGuiCond_FirstUseEver);
