@@ -19,10 +19,8 @@
 struct Vec2 {
   float x, y;
   bool operator==(const Vec2 &o) const {
-    const auto epsilon = 0.001;
-    const auto abs_x = std::abs(x) - std::abs(o.x);
-    const auto abs_y = std::abs(y) - std::abs(o.y);
-    return abs_x < epsilon && abs_y < epsilon;
+    const auto epsilon = 0.001f;
+    return std::abs(x - o.x) < epsilon && std::abs(y - o.y) < epsilon;
   }
 };
 
@@ -66,12 +64,17 @@ HpglDoc parseHpgl(const std::string &path) {
       doc.strokes.push_back({});
       cur = &doc.strokes.back();
       cur->pen = currentPen;
-      if (penDown)
+      if (penDown) {
         cur->points.push_back({cx, cy});
+        doc.minX = std::min(doc.minX, cx);
+        doc.minY = std::min(doc.minY, cy);
+        doc.maxX = std::max(doc.maxX, cx);
+        doc.maxY = std::max(doc.maxY, cy);
+      }
     }
   };
 
-  auto addPoint = [&](float x, float y) {
+  auto updateBounds = [&](float x, float y) {
     doc.minX = std::min(doc.minX, x);
     doc.minY = std::min(doc.minY, y);
     doc.maxX = std::max(doc.maxX, x);
@@ -130,42 +133,46 @@ HpglDoc parseHpgl(const std::string &path) {
       penDown = false;
       cur = nullptr;
       auto v = getCoords();
-      if (v.size() >= 2) {
-        cx = v[0];
-        cy = v[1];
+      // PU may carry coordinates — update position regardless
+      for (size_t i = 0; i + 1 < v.size(); i += 2) {
+        cx = v[i];
+        cy = v[i + 1];
       }
     } else if (c0 == 'P' && c1 == 'D') {
       penDown = true;
       auto v = getCoords();
-      if (v.size() >= 2) {
-        ensureStroke();
-        // first point = current position
-        if (cur->points.empty())
-          cur->points.push_back({cx, cy});
-        for (size_t i = 0; i + 1 < v.size(); i += 2) {
-          cx = v[i];
-          cy = v[i + 1];
-          cur->points.push_back({cx, cy});
-          addPoint(cx, cy);
-        }
-      } else {
-        ensureStroke();
-        if (cur->points.empty())
-          cur->points.push_back({cx, cy});
+      ensureStroke();
+      // anchor the stroke at the current pen position
+      if (cur->points.empty()) {
+        cur->points.push_back({cx, cy});
+        updateBounds(cx, cy);
+      }
+      // PD may also carry destination coordinates
+      for (size_t i = 0; i + 1 < v.size(); i += 2) {
+        cx = v[i];
+        cy = v[i + 1];
+        cur->points.push_back({cx, cy});
+        updateBounds(cx, cy);
       }
     } else if (c0 == 'P' && c1 == 'A') {
       auto v = getCoords();
       for (size_t i = 0; i + 1 < v.size(); i += 2) {
-        cx = v[i];
-        cy = v[i + 1];
         if (penDown) {
           ensureStroke();
-          if (cur->points.empty())
+          // anchor the stroke at the old position before we move
+          if (cur->points.empty()) {
             cur->points.push_back({cx, cy});
-          else {
-            cur->points.push_back({cx, cy});
-            addPoint(cx, cy);
+            updateBounds(cx, cy);
           }
+          // now advance to destination
+          cx = v[i];
+          cy = v[i + 1];
+          cur->points.push_back({cx, cy});
+          updateBounds(cx, cy);
+        } else {
+          // pen up: just move
+          cx = v[i];
+          cy = v[i + 1];
         }
       }
     }

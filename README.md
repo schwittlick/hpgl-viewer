@@ -43,6 +43,7 @@ sudo pacman -S glfw-wayland mesa meson ninja
 cd hpgl-viewer
 meson setup build
 ninja -C build
+sudo ninja install
 ```
 
 ### Run
