@@ -1,17 +1,16 @@
+#include <algorithm>
+#include <cstdio>
+#include <cstring>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <vector>
+
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 #include <GLFW/glfw3.h>
-
-#include <algorithm>
-#include <cstdio>
-#include <cstring>
-#include <fstream>
-#include <iostream>
-#include <sstream>
-#include <string>
-#include <vector>
 
 // ─── HPGL parser
 // ──────────────────────────────────────────────────────────────
@@ -95,8 +94,8 @@ HpglDoc parseHpgl(const std::string &path) {
     // read command (2 uppercase chars)
     if (pos + 1 >= content.size())
       break;
-    char c0 = toupper(content[pos]);
-    char c1 = toupper(content[pos + 1]);
+    char c0 = static_cast<char>(toupper(static_cast<unsigned char>(content[pos])));
+    char c1 = static_cast<char>(toupper(static_cast<unsigned char>(content[pos + 1])));
     pos += 2;
 
     // collect parameter string until ';' or next letter pair
@@ -255,7 +254,7 @@ static void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW,
     int pi = std::max(0, std::min(stroke.pen - 1, 7));
     ImU32 col = ImGui::ColorConvertFloat4ToU32(g_pens[pi].color);
     float thick = g_pens[pi].thickness;
-    
+
     // thickness in mm → screen pixels: mm * (HPGL units/mm) * (pixels/HPGL unit)
     float screen_thick = std::max(1.0f, thick * kHpglUnitsPerMm * g_scale);
 
