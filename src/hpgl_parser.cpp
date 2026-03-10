@@ -1,0 +1,163 @@
+#include "hpgl_parser.h"
+
+#include <algorithm>
+#include <fstream>
+#include <sstream>
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+static std::string trim(const std::string &s) {
+  size_t a = s.find_first_not_of(" \t\r\n");
+  if (a == std::string::npos)
+    return "";
+  size_t b = s.find_last_not_of(" \t\r\n");
+  return s.substr(a, b - a + 1);
+}
+
+// ── Private methods ───────────────────────────────────────────────────────────
+
+std::vector<float> HpglParser::parseCoords(const std::string &params) {
+  std::vector<float> v;
+  std::stringstream ss(params);
+  std::string tok;
+  while (std::getline(ss, tok, ',')) {
+    tok = trim(tok);
+    if (!tok.empty()) {
+      try {
+        v.push_back(std::stof(tok));
+      } catch (...) {
+      }
+    }
+  }
+  return v;
+}
+
+void HpglParser::updateBounds(float x, float y) {
+  doc.minX = std::min(doc.minX, x);
+  doc.minY = std::min(doc.minY, y);
+  doc.maxX = std::max(doc.maxX, x);
+  doc.maxY = std::max(doc.maxY, y);
+}
+
+void HpglParser::ensureStroke() {
+  if (!cur || cur->pen != currentPen) {
+    doc.strokes.push_back({});
+    cur = &doc.strokes.back();
+    cur->pen = currentPen;
+    if (penDown) {
+      cur->points.push_back({cx, cy});
+      updateBounds(cx, cy);
+    }
+  }
+}
+
+void HpglParser::handleSP(const std::string &params) {
+  auto v = parseCoords(params);
+  if (!v.empty())
+    currentPen = static_cast<int>(v[0]);
+  cur = nullptr;
+}
+
+void HpglParser::handlePU(const std::string &params) {
+  penDown = false;
+  cur = nullptr;
+  auto v = parseCoords(params);
+  for (size_t i = 0; i + 1 < v.size(); i += 2) {
+    cx = v[i];
+    cy = v[i + 1];
+  }
+}
+
+void HpglParser::handlePD(const std::string &params) {
+  penDown = true;
+  auto v = parseCoords(params);
+  ensureStroke();
+  if (cur->points.empty()) {
+    cur->points.push_back({cx, cy});
+    updateBounds(cx, cy);
+  }
+  for (size_t i = 0; i + 1 < v.size(); i += 2) {
+    cx = v[i];
+    cy = v[i + 1];
+    cur->points.push_back({cx, cy});
+    updateBounds(cx, cy);
+  }
+}
+
+void HpglParser::handlePA(const std::string &params) {
+  auto v = parseCoords(params);
+  for (size_t i = 0; i + 1 < v.size(); i += 2) {
+    if (penDown) {
+      ensureStroke();
+      if (cur->points.empty()) {
+        cur->points.push_back({cx, cy});
+        updateBounds(cx, cy);
+      }
+      cx = v[i];
+      cy = v[i + 1];
+      cur->points.push_back({cx, cy});
+      updateBounds(cx, cy);
+    } else {
+      cx = v[i];
+      cy = v[i + 1];
+    }
+  }
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
+HpglDoc HpglParser::parse(const std::string &content) {
+  // Reset state for a fresh parse.
+  doc      = {};
+  currentPen = 1;
+  penDown    = false;
+  cx = cy    = 0;
+  cur        = nullptr;
+
+  size_t pos = 0;
+  while (pos < content.size()) {
+    // Skip whitespace and semicolons.
+    while (pos < content.size() &&
+           (content[pos] == ';' || content[pos] == ' ' ||
+            content[pos] == '\n' || content[pos] == '\r' ||
+            content[pos] == '\t'))
+      ++pos;
+    if (pos >= content.size())
+      break;
+
+    // Read 2-char command mnemonic.
+    if (pos + 1 >= content.size())
+      break;
+    char c0 = static_cast<char>(toupper(static_cast<unsigned char>(content[pos])));
+    char c1 = static_cast<char>(toupper(static_cast<unsigned char>(content[pos + 1])));
+    pos += 2;
+
+    // Collect parameters up to the next semicolon.
+    std::string params;
+    while (pos < content.size() && content[pos] != ';')
+      params += content[pos++];
+    params = trim(params);
+
+    if      (c0 == 'S' && c1 == 'P') handleSP(params);
+    else if (c0 == 'P' && c1 == 'U') handlePU(params);
+    else if (c0 == 'P' && c1 == 'D') handlePD(params);
+    else if (c0 == 'P' && c1 == 'A') handlePA(params);
+  }
+
+  // Fallback bounds for empty/degenerate documents.
+  if (doc.minX > doc.maxX) {
+    doc.minX = doc.minY = 0;
+    doc.maxX = doc.maxY = 1;
+  }
+
+  return doc;
+}
+
+HpglDoc HpglParser::parseFile(const std::string &path) {
+  std::ifstream f(path);
+  if (!f)
+    return {};
+  std::string content((std::istreambuf_iterator<char>(f)),
+                      std::istreambuf_iterator<char>());
+  return parse(content);
+}

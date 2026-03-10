@@ -1,194 +1,18 @@
-#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
-#include <sstream>
 #include <string>
 #include <vector>
 #include <array>
 #include <filesystem>
+
+#include "hpgl_parser.h"
 
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 #include <GLFW/glfw3.h>
-
-// ─── HPGL parser
-// ──────────────────────────────────────────────────────────────
-
-struct Vec2 {
-  float x, y;
-  bool operator==(const Vec2 &o) const {
-    const auto epsilon = 0.001f;
-    return std::abs(x - o.x) < epsilon && std::abs(y - o.y) < epsilon;
-  }
-};
-
-struct Stroke {
-  std::vector<Vec2> points;
-  int pen = 1; // SP pen number
-};
-
-struct HpglDoc {
-  std::vector<Stroke> strokes;
-  float minX = 1e30f, minY = 1e30f;
-  float maxX = -1e30f, maxY = -1e30f;
-  bool empty() const { return strokes.empty(); }
-};
-
-static std::string trim(const std::string &s) {
-  size_t a = s.find_first_not_of(" \t\r\n");
-  if (a == std::string::npos)
-    return "";
-  size_t b = s.find_last_not_of(" \t\r\n");
-  return s.substr(a, b - a + 1);
-}
-
-HpglDoc parseHpgl(const std::string &path) {
-  HpglDoc doc;
-  std::ifstream f(path);
-  if (!f)
-    return doc;
-
-  std::string content((std::istreambuf_iterator<char>(f)),
-                      std::istreambuf_iterator<char>());
-
-  // Tokenise by ';'
-  int currentPen = 1;
-  bool penDown = false;
-  float cx = 0, cy = 0;
-  Stroke *cur = nullptr;
-
-  auto ensureStroke = [&]() {
-    if (!cur || cur->pen != currentPen) {
-      doc.strokes.push_back({});
-      cur = &doc.strokes.back();
-      cur->pen = currentPen;
-      if (penDown) {
-        cur->points.push_back({cx, cy});
-        doc.minX = std::min(doc.minX, cx);
-        doc.minY = std::min(doc.minY, cy);
-        doc.maxX = std::max(doc.maxX, cx);
-        doc.maxY = std::max(doc.maxY, cy);
-      }
-    }
-  };
-
-  auto updateBounds = [&](float x, float y) {
-    doc.minX = std::min(doc.minX, x);
-    doc.minY = std::min(doc.minY, y);
-    doc.maxX = std::max(doc.maxX, x);
-    doc.maxY = std::max(doc.maxY, y);
-  };
-
-  size_t pos = 0;
-  while (pos < content.size()) {
-    // skip whitespace / semicolons
-    while (pos < content.size() &&
-           (content[pos] == ';' || content[pos] == ' ' ||
-            content[pos] == '\n' || content[pos] == '\r' ||
-            content[pos] == '\t'))
-      ++pos;
-    if (pos >= content.size())
-      break;
-
-    // read command (2 uppercase chars)
-    if (pos + 1 >= content.size())
-      break;
-    char c0 = static_cast<char>(toupper(static_cast<unsigned char>(content[pos])));
-    char c1 = static_cast<char>(toupper(static_cast<unsigned char>(content[pos + 1])));
-    pos += 2;
-
-    // collect parameter string until ';' or next letter pair
-    std::string params;
-    while (pos < content.size() && content[pos] != ';') {
-      params += content[pos++];
-    }
-    params = trim(params);
-
-    // parse comma-separated floats
-    auto getCoords = [&]() -> std::vector<float> {
-      std::vector<float> v;
-      std::stringstream ss(params);
-      std::string tok;
-      while (std::getline(ss, tok, ',')) {
-        tok = trim(tok);
-        if (!tok.empty()) {
-          try {
-            v.push_back(std::stof(tok));
-          } catch (...) {
-          }
-        }
-      }
-      return v;
-    };
-
-    if (c0 == 'S' && c1 == 'P') {
-      // Select Pen
-      auto v = getCoords();
-      if (!v.empty())
-        currentPen = (int)v[0];
-      cur = nullptr;
-    } else if (c0 == 'P' && c1 == 'U') {
-      penDown = false;
-      cur = nullptr;
-      auto v = getCoords();
-      // PU may carry coordinates — update position regardless
-      for (size_t i = 0; i + 1 < v.size(); i += 2) {
-        cx = v[i];
-        cy = v[i + 1];
-      }
-    } else if (c0 == 'P' && c1 == 'D') {
-      penDown = true;
-      auto v = getCoords();
-      ensureStroke();
-      // anchor the stroke at the current pen position
-      if (cur->points.empty()) {
-        cur->points.push_back({cx, cy});
-        updateBounds(cx, cy);
-      }
-      // PD may also carry destination coordinates
-      for (size_t i = 0; i + 1 < v.size(); i += 2) {
-        cx = v[i];
-        cy = v[i + 1];
-        cur->points.push_back({cx, cy});
-        updateBounds(cx, cy);
-      }
-    } else if (c0 == 'P' && c1 == 'A') {
-      auto v = getCoords();
-      for (size_t i = 0; i + 1 < v.size(); i += 2) {
-        if (penDown) {
-          ensureStroke();
-          // anchor the stroke at the old position before we move
-          if (cur->points.empty()) {
-            cur->points.push_back({cx, cy});
-            updateBounds(cx, cy);
-          }
-          // now advance to destination
-          cx = v[i];
-          cy = v[i + 1];
-          cur->points.push_back({cx, cy});
-          updateBounds(cx, cy);
-        } else {
-          // pen up: just move
-          cx = v[i];
-          cy = v[i + 1];
-        }
-      }
-    }
-  }
-
-  // fallback bounds
-  if (doc.minX > doc.maxX) {
-    doc.minX = 0;
-    doc.maxX = 1;
-    doc.minY = 0;
-    doc.maxY = 1;
-  }
-
-  return doc;
-}
 
 // ─── Config
 // ──────────────────────────────────────────────────────────────────
@@ -440,7 +264,7 @@ int main(int argc, char** argv) {
   if (argc > 1) {
       g_filePath = argv[1];
       strncpy(g_filePathBuf, g_filePath.c_str(), sizeof(g_filePathBuf) - 1);
-      g_doc = parseHpgl(g_filePath);
+      g_doc = HpglParser{}.parseFile(g_filePath);
       g_fitRequested = true;
   }
 
@@ -463,7 +287,7 @@ int main(int argc, char** argv) {
         if (!path.empty()) {
           g_filePath = path;
           strncpy(g_filePathBuf, path.c_str(), sizeof(g_filePathBuf) - 1);
-          g_doc = parseHpgl(g_filePath);
+          g_doc = HpglParser{}.parseFile(g_filePath);
           g_fitRequested = true;
         }
       }
@@ -489,7 +313,7 @@ int main(int argc, char** argv) {
     ImGui::SameLine();
     if (ImGui::Button("Open")) {
       g_filePath = g_filePathBuf;
-      g_doc = parseHpgl(g_filePath);
+      g_doc = HpglParser{}.parseFile(g_filePath);
       g_fitRequested = true;
     }
     if (!g_filePath.empty()) {

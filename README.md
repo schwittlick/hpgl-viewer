@@ -54,6 +54,15 @@ ninja -C build
 sudo ninja install
 ```
 
+### Test
+
+```bash
+cd hpgl-viewer
+meson setup build
+ninja -C build test
+```
+
+
 ### Run
 
 ```bash

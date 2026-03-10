@@ -18,10 +18,25 @@ imgui_dep = imgui_proj.get_variable('imgui_dep')
 
 # ── Executable ───────────────────────────────────────────────────────────────
 
+parser_lib = static_library('hpgl_parser',
+  sources : ['src/hpgl_parser.cpp'],
+  include_directories : include_directories('src'))
+
 executable('hpgl-viewer',
   sources : ['src/main.cpp'],
+  link_with : parser_lib,
+  include_directories : include_directories('src'),
   dependencies : [glfw_dep, gl_dep, imgui_dep],
   install : true)
+
+# ── Tests ─────────────────────────────────────────────────────────────────────
+
+test_exe = executable('test_hpgl_parser',
+  sources : ['tests/test_hpgl_parser.cpp'],
+  link_with : parser_lib,
+  include_directories : include_directories('src'))
+
+test('hpgl parser', test_exe)
 
 # ── Desktop integration ───────────────────────────────────────────────────────
 
