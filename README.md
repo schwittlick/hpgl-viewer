@@ -27,6 +27,7 @@ A lightweight HPGL file viewer built with Dear ImGui + OpenGL3 + GLFW.
 - `glfw3` (system package) (sudo pacman -S glfw-wayland)
 - `gl` / `opengl` (system)
 - `meson` ≥ 1.0, `ninja`
+- kdialog
 - Internet access for the first build (fetches ImGui via wrap)
 
 ```bash
