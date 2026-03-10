@@ -20,6 +20,13 @@ A lightweight HPGL file viewer built with Dear ImGui + OpenGL3 + GLFW.
 - Per-pen color (color picker) and line thickness (slider)
 - Plotter coordinate tooltip on hover
 
+## Keyboard shortcuts
+
+- o: open file
+- f: fullscreen
+- q: quit
+- c: fit to window
+
 ## Build
 
 ### Dependencies
