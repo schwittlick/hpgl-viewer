@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y meson ninja-build libglfw3-dev libgl-dev
+
+      - name: Configure
+        run: meson setup builddir --buildtype=debug
+
+      - name: Build tests
+        run: ninja -C builddir test_hpgl_parser
+
+      - name: Run tests
+        run: ninja -C builddir test
