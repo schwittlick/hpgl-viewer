@@ -5,6 +5,7 @@
 #include <vector>
 #include <array>
 #include <filesystem>
+#include <cmath>
 
 #include "hpgl_parser.h"
 
@@ -120,8 +121,9 @@ static std::string g_filePath;
 static char g_filePathBuf[1024] = "";
 static bool g_fitRequested = false;
 
-// pan/zoom state (in canvas coords)
+// pan/zoom/rotation state
 static float g_panX = 0, g_panY = 0, g_scale = 1.0f;
+static float g_rotation = 0.0f; // radians, multiples of π/2
 
 // fullscreen state
 static bool g_isFullscreen = false;
@@ -152,14 +154,21 @@ static void fitView(float canvasW, float canvasH) {
     return;
   float docW = g_doc.maxX - g_doc.minX;
   float docH = g_doc.maxY - g_doc.minY;
-  if (docW < 1)
-    docW = 1;
-  if (docH < 1)
-    docH = 1;
+  if (docW < 1) docW = 1;
+  if (docH < 1) docH = 1;
+
+  // Effective screen-space bounding box of the (possibly rotated) document
+  float absC = fabsf(cosf(g_rotation));
+  float absS = fabsf(sinf(g_rotation));
+  float effW = docW * absC + docH * absS;
+  float effH = docW * absS + docH * absC;
+
   float pad = 0.05f;
-  g_scale = std::min(canvasW / docW, canvasH / docH) * (1.0f - 2 * pad);
-  g_panX = (canvasW - docW * g_scale) * 0.5f - g_doc.minX * g_scale;
-  g_panY = (canvasH - docH * g_scale) * 0.5f - g_doc.minY * g_scale;
+  g_scale = std::min(canvasW / effW, canvasH / effH) * (1.0f - 2.0f * pad);
+
+  // Center the document midpoint on the canvas
+  g_panX = canvasW * 0.5f - (g_doc.minX + docW * 0.5f) * g_scale;
+  g_panY = canvasH * 0.5f - (g_doc.minY + docH * 0.5f) * g_scale;
 }
 
 static void toggleFullscreen(GLFWwindow *window) {
@@ -181,34 +190,43 @@ static void toggleFullscreen(GLFWwindow *window) {
 // ─── Drawing
 // ──────────────────────────────────────────────────────────────────
 
+// Transform one HPGL point to screen space, applying pan/zoom/rotation.
+static ImVec2 xfPoint(float hx, float hy, ImVec2 origin, float cW, float cH,
+                      float cosR, float sinR) {
+  float sx = hx * g_scale + g_panX - cW * 0.5f;
+  float sy = hy * g_scale + g_panY - cH * 0.5f;
+  return {origin.x + sx * cosR - sy * sinR + cW * 0.5f,
+          origin.y + sx * sinR + sy * cosR + cH * 0.5f};
+}
+
 static void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW,
                      float canvasH) {
-  // clip
   dl->PushClipRect(origin, {origin.x + canvasW, origin.y + canvasH}, true);
+
+  float cosR = cosf(g_rotation);
+  float sinR = sinf(g_rotation);
 
   for (auto &stroke : g_doc.strokes) {
     if (stroke.points.empty())
       continue;
     int pi = std::max(0, std::min(stroke.pen - 1, 7));
     ImU32 col = ImGui::ColorConvertFloat4ToU32(g_pens[pi].color);
-    float thick = g_pens[pi].thickness;
-
-    // thickness in mm → screen pixels: mm * (HPGL units/mm) * (pixels/HPGL unit)
-    float screen_thick = std::max(1.0f, thick * kHpglUnitsPerMm * g_scale);
+    float screen_thick =
+        std::max(1.0f, g_pens[pi].thickness * kHpglUnitsPerMm * g_scale);
 
     if (stroke.points.size() == 2 && stroke.points[0] == stroke.points[1]) {
-      float x = origin.x + stroke.points[0].x * g_scale + g_panX;
-      float y = origin.y + stroke.points[0].y * g_scale + g_panY;
-      dl->AddCircleFilled({x, y}, screen_thick * 0.5f, col);
+      ImVec2 p = xfPoint(stroke.points[0].x, stroke.points[0].y, origin,
+                         canvasW, canvasH, cosR, sinR);
+      dl->AddCircleFilled(p, screen_thick * 0.5f, col);
       continue;
     }
 
     for (size_t i = 0; i + 1 < stroke.points.size(); ++i) {
-      float x0 = origin.x + stroke.points[i].x * g_scale + g_panX;
-      float y0 = origin.y + stroke.points[i].y * g_scale + g_panY;
-      float x1 = origin.x + stroke.points[i + 1].x * g_scale + g_panX;
-      float y1 = origin.y + stroke.points[i + 1].y * g_scale + g_panY;
-      dl->AddLine({x0, y0}, {x1, y1}, col, screen_thick);
+      ImVec2 p0 = xfPoint(stroke.points[i].x, stroke.points[i].y, origin,
+                          canvasW, canvasH, cosR, sinR);
+      ImVec2 p1 = xfPoint(stroke.points[i + 1].x, stroke.points[i + 1].y,
+                          origin, canvasW, canvasH, cosR, sinR);
+      dl->AddLine(p0, p1, col, screen_thick);
     }
   }
   dl->PopClipRect();
@@ -282,6 +300,10 @@ int main(int argc, char** argv) {
         toggleFullscreen(window);
       if (ImGui::IsKeyPressed(ImGuiKey_C))
         g_fitRequested = true;
+      if (ImGui::IsKeyPressed(ImGuiKey_R)) {
+        g_rotation += static_cast<float>(M_PI_2);
+        g_fitRequested = true;
+      }
       if (ImGui::IsKeyPressed(ImGuiKey_O)) {
         std::string path = openFileDialog();
         if (!path.empty()) {
