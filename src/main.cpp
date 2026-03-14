@@ -127,6 +127,33 @@ static float g_rotation = 0.0f; // radians, multiples of π/2
 static bool  g_showPenUp = false;
 static float g_penUpThreshold = 30.0f; // cm
 
+// Cached doc stats (recomputed on load)
+static int   g_numPaths    = 0;
+static float g_penDownDist = 0.0f; // mm
+static float g_penUpDist   = 0.0f; // mm
+static void computeDocStats() {
+  g_numPaths    = (int)g_doc.strokes.size();
+  g_penDownDist = 0.0f;
+  g_penUpDist   = 0.0f;
+  for (auto &s : g_doc.strokes) {
+    for (size_t i = 0; i + 1 < s.points.size(); ++i) {
+      float dx = s.points[i+1].x - s.points[i].x;
+      float dy = s.points[i+1].y - s.points[i].y;
+      g_penDownDist += sqrtf(dx*dx + dy*dy);
+    }
+  }
+  for (size_t i = 0; i + 1 < g_doc.strokes.size(); ++i) {
+    const auto &a = g_doc.strokes[i];
+    const auto &b = g_doc.strokes[i+1];
+    if (a.points.empty() || b.points.empty()) continue;
+    float dx = b.points.front().x - a.points.back().x;
+    float dy = b.points.front().y - a.points.back().y;
+    g_penUpDist += sqrtf(dx*dx + dy*dy);
+  }
+  g_penDownDist /= kHpglUnitsPerMm;
+  g_penUpDist   /= kHpglUnitsPerMm;
+}
+
 // fullscreen state
 static bool g_isFullscreen = false;
 static int g_windowedX = 100, g_windowedY = 100;
@@ -235,22 +262,17 @@ static void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW,
   if (g_showPenUp) {
     const ImU32 colNormal = IM_COL32(60, 220, 100, 160);
     const ImU32 colLong   = IM_COL32(220, 50, 50, 200);
-    // 1 cm = 10 mm = 400 HPGL units
-    float thresholdSq = g_penUpThreshold * 400.0f;
-    thresholdSq *= thresholdSq;
-
+    float t = g_penUpThreshold * 400.0f; // cm → HPGL units
+    float thresholdSq = t * t;
     for (size_t i = 0; i + 1 < g_doc.strokes.size(); ++i) {
       const auto &a = g_doc.strokes[i];
       const auto &b = g_doc.strokes[i + 1];
-      if (a.points.empty() || b.points.empty())
-        continue;
+      if (a.points.empty() || b.points.empty()) continue;
       float dx = b.points.front().x - a.points.back().x;
       float dy = b.points.front().y - a.points.back().y;
-      ImU32 col = (dx * dx + dy * dy) > thresholdSq ? colLong : colNormal;
-      ImVec2 p0 = xfPoint(a.points.back().x, a.points.back().y, origin,
-                          canvasW, canvasH, cosR, sinR);
-      ImVec2 p1 = xfPoint(b.points.front().x, b.points.front().y, origin,
-                          canvasW, canvasH, cosR, sinR);
+      ImU32 col = (dx*dx + dy*dy) > thresholdSq ? colLong : colNormal;
+      ImVec2 p0 = xfPoint(a.points.back().x,  a.points.back().y,  origin, canvasW, canvasH, cosR, sinR);
+      ImVec2 p1 = xfPoint(b.points.front().x, b.points.front().y, origin, canvasW, canvasH, cosR, sinR);
       dl->AddLine(p0, p1, col, 1.0f);
     }
   }
@@ -309,6 +331,7 @@ int main(int argc, char** argv) {
       g_filePath = argv[1];
       strncpy(g_filePathBuf, g_filePath.c_str(), sizeof(g_filePathBuf) - 1);
       g_doc = HpglParser{}.parseFile(g_filePath);
+      computeDocStats();
       g_fitRequested = true;
   }
 
@@ -336,6 +359,7 @@ int main(int argc, char** argv) {
           g_filePath = path;
           strncpy(g_filePathBuf, path.c_str(), sizeof(g_filePathBuf) - 1);
           g_doc = HpglParser{}.parseFile(g_filePath);
+          computeDocStats();
           g_fitRequested = true;
         }
       }
@@ -362,6 +386,7 @@ int main(int argc, char** argv) {
     if (ImGui::Button("Open")) {
       g_filePath = g_filePathBuf;
       g_doc = HpglParser{}.parseFile(g_filePath);
+      computeDocStats();
       g_fitRequested = true;
     }
     if (!g_filePath.empty()) {
@@ -460,6 +485,33 @@ int main(int argc, char** argv) {
     }
 
     drawHpgl(dl, canvasPos, cW, cH);
+
+    // Stats overlay — top-right corner of canvas
+    {
+      char lines[4][48];
+      snprintf(lines[0], sizeof(lines[0]), "%.0f FPS", io.Framerate);
+      snprintf(lines[1], sizeof(lines[1]), "%d paths", g_numPaths);
+      snprintf(lines[2], sizeof(lines[2]), "pd %.2f m", g_penDownDist / 1000.0f);
+      snprintf(lines[3], sizeof(lines[3]), "pu %.2f m", g_penUpDist   / 1000.0f);
+      float pad   = 6.0f;
+      float lineH = ImGui::GetTextLineHeight();
+      float step  = lineH + 2.0f;
+
+      // Find widest line for background rect
+      float maxW = 0;
+      for (auto &l : lines) maxW = std::max(maxW, ImGui::CalcTextSize(l).x);
+      float boxH = 4 * step + pad;
+      ImVec2 boxMax = {canvasPos.x + cW - pad, canvasPos.y + pad + boxH};
+      ImVec2 boxMin = {boxMax.x - maxW - pad,  canvasPos.y + pad};
+      dl->AddRectFilled(boxMin, boxMax, IM_COL32(0, 0, 0, 140), 4.0f);
+
+      for (int li = 0; li < 4; ++li) {
+        ImVec2 sz  = ImGui::CalcTextSize(lines[li]);
+        ImVec2 pos = {canvasPos.x + cW - sz.x - pad * 1.5f,
+                      canvasPos.y + pad * 1.5f + li * step};
+        dl->AddText(pos, IM_COL32(255, 255, 255, 230), lines[li]);
+      }
+    }
 
     // Tooltip with plotter coords
     if (hovered) {
