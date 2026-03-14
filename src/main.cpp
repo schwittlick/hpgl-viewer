@@ -124,6 +124,8 @@ static bool g_fitRequested = false;
 // pan/zoom/rotation state
 static float g_panX = 0, g_panY = 0, g_scale = 1.0f;
 static float g_rotation = 0.0f; // radians, multiples of π/2
+static bool  g_showPenUp = false;
+static float g_penUpThreshold = 30.0f; // cm
 
 // fullscreen state
 static bool g_isFullscreen = false;
@@ -229,6 +231,30 @@ static void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW,
       dl->AddLine(p0, p1, col, screen_thick);
     }
   }
+
+  if (g_showPenUp) {
+    const ImU32 colNormal = IM_COL32(60, 220, 100, 160);
+    const ImU32 colLong   = IM_COL32(220, 50, 50, 200);
+    // 1 cm = 10 mm = 400 HPGL units
+    float thresholdSq = g_penUpThreshold * 400.0f;
+    thresholdSq *= thresholdSq;
+
+    for (size_t i = 0; i + 1 < g_doc.strokes.size(); ++i) {
+      const auto &a = g_doc.strokes[i];
+      const auto &b = g_doc.strokes[i + 1];
+      if (a.points.empty() || b.points.empty())
+        continue;
+      float dx = b.points.front().x - a.points.back().x;
+      float dy = b.points.front().y - a.points.back().y;
+      ImU32 col = (dx * dx + dy * dy) > thresholdSq ? colLong : colNormal;
+      ImVec2 p0 = xfPoint(a.points.back().x, a.points.back().y, origin,
+                          canvasW, canvasH, cosR, sinR);
+      ImVec2 p1 = xfPoint(b.points.front().x, b.points.front().y, origin,
+                          canvasW, canvasH, cosR, sinR);
+      dl->AddLine(p0, p1, col, 1.0f);
+    }
+  }
+
   dl->PopClipRect();
 }
 
@@ -346,6 +372,11 @@ int main(int argc, char** argv) {
     }
 
     ImGui::SeparatorText("View");
+    ImGui::Checkbox("Show pen-up moves", &g_showPenUp);
+    if (g_showPenUp) {
+      ImGui::SetNextItemWidth(150);
+      ImGui::SliderFloat("Long move threshold", &g_penUpThreshold, 0.0f, 200.0f, "%.0f cm");
+    }
     ImGui::Text("Scale: %.3f", g_scale);
     ImGui::SameLine();
     if (ImGui::Button("Fit"))
