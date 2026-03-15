@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -448,6 +449,94 @@ static void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW,
   dl->PopClipRect();
 }
 
+// ─── Pen-up fix + HPGL export
+// ────────────────────────────────────────────────────────────
+
+// 3 cm in HPGL units (40 units/mm × 10 mm/cm × 3 cm)
+static constexpr float kFixStepUnits = 3.0f * 10.0f * kHpglUnitsPerMm;
+
+// For every pen-up jump where |ΔX| > kFixStepUnits, insert single-point
+// pen-down stops linearly interpolated along the direct path. Original
+// strokes stay in their original order; stops are inserted between them.
+// Stops use linearly interpolated positions so they are predictably
+// "along the way" and don't borrow points from unrelated strokes.
+static HpglDoc fixLongPenUps(const HpglDoc &src) {
+  HpglDoc result;
+  result.minX = src.minX; result.maxX = src.maxX;
+  result.minY = src.minY; result.maxY = src.maxY;
+
+  Vec2 pen{0.f, 0.f};
+  for (const auto &stroke : src.strokes) {
+    if (stroke.points.empty()) { result.strokes.push_back(stroke); continue; }
+    Vec2  dst    = stroke.points.front();
+    float dx     = dst.x - pen.x;
+    float dy     = dst.y - pen.y;
+    float totalX = std::abs(dx);
+
+    if (totalX > kFixStepUnits) {
+      float signX = dx > 0 ? 1.f : -1.f;
+      float curX  = pen.x;
+
+      while (true) {
+        float remaining = std::abs(dst.x - curX);
+        if (remaining <= kFixStepUnits * 1.5f) break;
+
+        float nextX = curX + signX * kFixStepUnits;
+        float t     = std::abs(nextX - pen.x) / totalX;
+        Vec2  wp    = {nextX, pen.y + t * dy};
+        result.strokes.push_back(Stroke{{wp, wp}, stroke.pen}); // two identical pts → dot
+        curX = nextX;
+      }
+    }
+
+    result.strokes.push_back(stroke);
+    pen = stroke.points.back();
+  }
+
+  return result;
+}
+
+// Write doc as HPGL. Single-point strokes become a pen-down touch (PD with
+// no coordinates = mark at current position after PU moves there).
+static bool exportHpgl(const HpglDoc &doc, const std::string &path) {
+  FILE *f = fopen(path.c_str(), "w");
+  if (!f) return false;
+
+  fprintf(f, "IN;\n");
+  int curPen = -1;
+  for (const auto &stroke : doc.strokes) {
+    if (stroke.points.empty()) continue;
+    if (stroke.pen != curPen) {
+      fprintf(f, "SP%d;\n", stroke.pen);
+      curPen = stroke.pen;
+    }
+    const Vec2 &s = stroke.points.front();
+    fprintf(f, "PU%.0f,%.0f;", s.x, s.y);
+    if (stroke.points.size() == 1) {
+      fprintf(f, "PD;\n");
+    } else {
+      fprintf(f, "PD");
+      for (size_t i = 1; i < stroke.points.size(); ++i) {
+        if (i > 1) fputc(',', f);
+        fprintf(f, "%.0f,%.0f", stroke.points[i].x, stroke.points[i].y);
+      }
+      fprintf(f, ";\n");
+    }
+  }
+  fprintf(f, "PU;\n");
+  fclose(f);
+  return true;
+}
+
+// Derive output path: insert "_fixed" before the last extension.
+static std::string fixedPath(const std::string &src) {
+  auto dot = src.rfind('.');
+  if (dot == std::string::npos) return src + "_fixed.hpgl";
+  return src.substr(0, dot) + "_fixed" + src.substr(dot);
+}
+
+static std::string g_fixStatus; // shown in sidebar after fix
+
 // ─── Layout
 // ────────────────────────────────────────────────────────────────────
 
@@ -526,6 +615,21 @@ int main(int argc, char** argv) {
         g_rotation += static_cast<float>(M_PI_2);
         g_fitRequested = true;
       }
+      if (ImGui::IsKeyPressed(ImGuiKey_E) && !g_filePath.empty()) {
+        HpglDoc fixed = fixLongPenUps(g_doc);
+        std::string out = fixedPath(g_filePath);
+        if (exportHpgl(fixed, out)) {
+          g_doc = std::move(fixed);
+          g_filePath = out;
+          strncpy(g_filePathBuf, out.c_str(), sizeof(g_filePathBuf) - 1);
+          computeDocStats();
+          g_penUpRenderer.upload(g_doc);
+          g_fitRequested = true;
+          g_fixStatus = "Saved: " + out;
+        } else {
+          g_fixStatus = "Export failed: " + out;
+        }
+      }
       if (ImGui::IsKeyPressed(ImGuiKey_O)) {
         std::string path = openFileDialog();
         if (!path.empty()) {
@@ -570,6 +674,28 @@ int main(int argc, char** argv) {
       ImGui::Text("Bounds: (%.0f,%.0f)-(%.0f,%.0f)", g_doc.minX, g_doc.minY,
                   g_doc.maxX, g_doc.maxY);
     }
+
+    ImGui::SeparatorText("Fix");
+    ImGui::BeginDisabled(g_filePath.empty());
+    if (ImGui::Button("Fix long pen-up jumps  [E]")) {
+      HpglDoc fixed = fixLongPenUps(g_doc);
+      std::string out = fixedPath(g_filePath);
+      if (exportHpgl(fixed, out)) {
+        g_doc = std::move(fixed);
+        g_filePath = out;
+        strncpy(g_filePathBuf, out.c_str(), sizeof(g_filePathBuf) - 1);
+        computeDocStats();
+        g_penUpRenderer.upload(g_doc);
+        g_fitRequested = true;
+        g_fixStatus = "Saved: " + out;
+      } else {
+        g_fixStatus = "Export failed: " + out;
+      }
+    }
+    ImGui::EndDisabled();
+    ImGui::TextWrapped("Splits pen-up X jumps >3 cm into waypoints via\nnearby existing points.");
+    if (!g_fixStatus.empty())
+      ImGui::TextWrapped("%s", g_fixStatus.c_str());
 
     ImGui::SeparatorText("View");
     ImGui::Checkbox("Show pen-up moves", &g_showPenUp);
