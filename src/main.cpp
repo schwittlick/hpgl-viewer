@@ -226,7 +226,6 @@ static const char *kPenUpVertSrc = R"glsl(
 layout(location = 0) in vec2  aPos;    // HPGL coordinates
 layout(location = 1) in float aLenSq;  // squared segment length (HPGL units²)
 layout(location = 2) in float aStartX; // HPGL X of segment start (same for both verts)
-layout(location = 3) in float aDx;     // HPGL dx = end.x - start.x (same for both verts)
 
 uniform float uScale, uCosR, uSinR, uPanX, uPanY;
 uniform float uOriginX, uOriginY, uCanvasW, uCanvasH;
@@ -234,12 +233,10 @@ uniform float uDispX, uDispY, uDispW, uDispH;  // ImGui DisplayPos / DisplaySize
 
 out float vLenSq;
 out float vStartX;
-out float vDx;
 
 void main() {
     vLenSq  = aLenSq;
     vStartX = aStartX;
-    vDx     = aDx;
     // HPGL → rotated screen space (matches xfPoint() in CPU code)
     float lx = aPos.x * uScale + uPanX - uCanvasW * 0.5;
     float ly = aPos.y * uScale + uPanY - uCanvasH * 0.5;
@@ -257,16 +254,14 @@ static const char *kPenUpFragSrc = R"glsl(
 #version 330 core
 in float vLenSq;
 in float vStartX;
-in float vDx;
 uniform float uThresholdSq;
 uniform float uCutoffX;   // HPGL X cutoff (left-zone boundary)
 out vec4 fragColor;
 
 void main() {
-    bool isLong  = vLenSq  > uThresholdSq;
-    bool isLTR   = vDx     > 0.0;
-    bool inZone  = vStartX <= uCutoffX;
-    if (isLong && isLTR && inZone)
+    bool isLong = vLenSq  > uThresholdSq;
+    bool inZone = vStartX <= uCutoffX;
+    if (isLong && inZone)
         fragColor = vec4(220.0/255.0,  50.0/255.0,  50.0/255.0, 200.0/255.0); // red: will fix
     else if (isLong)
         fragColor = vec4(220.0/255.0, 150.0/255.0,  50.0/255.0, 180.0/255.0); // orange: long, skipped
@@ -331,9 +326,9 @@ struct PenUpRenderer {
   // Call once after a new file is loaded.
   void upload(const HpglDoc &doc) {
     if (!valid) return;
-    // 5 floats per vertex: x, y, lenSq, startX, dx — 2 vertices per pen-up segment
+    // 4 floats per vertex: x, y, lenSq, startX — 2 vertices per pen-up segment
     std::vector<float> data;
-    data.reserve(doc.strokes.size() * 10);
+    data.reserve(doc.strokes.size() * 8);
     for (size_t i = 0; i + 1 < doc.strokes.size(); ++i) {
       const auto &a = doc.strokes[i];
       const auto &b = doc.strokes[i + 1];
@@ -342,18 +337,18 @@ struct PenUpRenderer {
       float x1 = b.points.front().x, y1 = b.points.front().y;
       float dx = x1 - x0, dy = y1 - y0;
       float lenSq = dx*dx + dy*dy;
-      // startX and dx are identical for both vertices of the segment
-      data.insert(data.end(), {x0, y0, lenSq, x0, dx,
-                                x1, y1, lenSq, x0, dx});
+      // startX is identical for both vertices of the segment
+      data.insert(data.end(), {x0, y0, lenSq, x0,
+                                x1, y1, lenSq, x0});
     }
-    vertexCount = (int)(data.size() / 5);
+    vertexCount = (int)(data.size() / 4);
 
     glBindVertexArray(vao);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferData(GL_ARRAY_BUFFER,
                  (GLsizeiptr)(data.size() * sizeof(float)),
                  data.data(), GL_STATIC_DRAW);
-    constexpr int stride = 5 * sizeof(float);
+    constexpr int stride = 4 * sizeof(float);
     // attrib 0: vec2 position
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, stride, (void*)0);
     glEnableVertexAttribArray(0);
@@ -363,9 +358,6 @@ struct PenUpRenderer {
     // attrib 2: float startX
     glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, stride, (void*)(3 * sizeof(float)));
     glEnableVertexAttribArray(2);
-    // attrib 3: float dx
-    glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, stride, (void*)(4 * sizeof(float)));
-    glEnableVertexAttribArray(3);
     glBindVertexArray(0);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
   }
@@ -507,7 +499,7 @@ static HpglDoc fixLongPenUps(const HpglDoc &src, float thresholdUnits, float ste
       float dy   = dst.y - prev.y;
       float dist = sqrtf(dx*dx + dy*dy);
 
-      if (dist > thresholdUnits && dx > 0.0f && prev.x <= cutoffX) {
+      if (dist > thresholdUnits && prev.x <= cutoffX) {
         int steps = (int)(dist / stepUnits);
         for (int k = 1; k <= steps; ++k) {
           float t  = (float)k * stepUnits / dist;
