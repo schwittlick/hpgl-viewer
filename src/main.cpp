@@ -659,6 +659,18 @@ int main(int argc, char** argv) {
       }
     }
 
+    // ── Top status bar ───────────────────────────────────────────────────
+    if (ImGui::BeginMainMenuBar()) {
+      if (g_filePath.empty()) {
+        ImGui::TextDisabled("No file loaded");
+      } else {
+        std::string name = fs::path(g_filePath).filename().string();
+        if (g_hasFixed) name += "  [unsaved fix]";
+        ImGui::TextUnformatted(name.c_str());
+      }
+      ImGui::EndMainMenuBar();
+    }
+
     // Full-window dockspace
     ImGuiID dockspace_id = ImGui::DockSpaceOverViewport(
         0, ImGui::GetMainViewport(), ImGuiDockNodeFlags_PassthruCentralNode);
@@ -725,8 +737,6 @@ int main(int argc, char** argv) {
     ImGui::SliderFloat("Waypoint spacing", &g_fixStepCm, 0.5f, 20.0f, "%.1f cm");
     ImGui::SetNextItemWidth(150);
     ImGui::SliderFloat("Left zone", &g_fixLeftPct, 0.0f, 100.0f, "%.0f%%");
-    if (!g_fixStatus.empty())
-      ImGui::TextWrapped("%s", g_fixStatus.c_str());
     if (!g_fixStatus.empty())
       ImGui::TextWrapped("%s", g_fixStatus.c_str());
 
