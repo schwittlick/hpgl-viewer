@@ -122,6 +122,7 @@ static float g_panX = 0, g_panY = 0, g_scale = 1.0f;
 static float g_rotation = 0.0f;
 static bool  g_showPenUp = false;
 static float g_penUpThreshold = 30.0f; // cm
+static float g_fixStepCm      =  3.0f; // cm between inserted waypoints
 
 // Framebuffer size (updated each frame)
 static int g_fbW = 0, g_fbH = 0;
@@ -452,37 +453,38 @@ static void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW,
 // ─── Pen-up fix + HPGL export
 // ────────────────────────────────────────────────────────────
 
-// 3 cm in HPGL units (40 units/mm × 10 mm/cm × 3 cm) — spacing between waypoints
-static constexpr float kFixStepUnits = 3.0f * 10.0f * kHpglUnitsPerMm;
-
-// For every pen-up jump whose Euclidean length exceeds thresholdUnits, insert
-// single-point pen-down stops spaced kFixStepUnits apart along the direct path.
-// Uses the same Euclidean metric as the pen-up visualisation so the slider
-// threshold and the fix threshold are consistent.
-static HpglDoc fixLongPenUps(const HpglDoc &src, float thresholdUnits) {
+// For every inter-stroke pen-up move whose Euclidean length exceeds
+// thresholdUnits, insert single-point pen-down stops spaced stepUnits apart
+// along the direct path.  Mirrors the GPU renderer exactly: only
+// strokes[i-1].back() → strokes[i].front() moves are considered, so the
+// set of moves that get fixed matches the set shown in the visualisation.
+static HpglDoc fixLongPenUps(const HpglDoc &src, float thresholdUnits, float stepUnits) {
   HpglDoc result;
   result.minX = src.minX; result.maxX = src.maxX;
   result.minY = src.minY; result.maxY = src.maxY;
 
-  Vec2 pen{0.f, 0.f};
-  for (const auto &stroke : src.strokes) {
+  for (size_t i = 0; i < src.strokes.size(); ++i) {
+    const auto &stroke = src.strokes[i];
     if (stroke.points.empty()) { result.strokes.push_back(stroke); continue; }
-    Vec2  dst  = stroke.points.front();
-    float dx   = dst.x - pen.x;
-    float dy   = dst.y - pen.y;
-    float dist = sqrtf(dx*dx + dy*dy);
 
-    if (dist > thresholdUnits) {
-      int steps = (int)(dist / kFixStepUnits);
-      for (int k = 1; k <= steps; ++k) {
-        float t  = (float)k * kFixStepUnits / dist;
-        Vec2  wp = {pen.x + t * dx, pen.y + t * dy};
-        result.strokes.push_back(Stroke{{wp, wp}, stroke.pen}); // two identical pts → dot
+    if (i > 0 && !src.strokes[i - 1].points.empty()) {
+      Vec2  prev = src.strokes[i - 1].points.back();
+      Vec2  dst  = stroke.points.front();
+      float dx   = dst.x - prev.x;
+      float dy   = dst.y - prev.y;
+      float dist = sqrtf(dx*dx + dy*dy);
+
+      if (dist > thresholdUnits) {
+        int steps = (int)(dist / stepUnits);
+        for (int k = 1; k <= steps; ++k) {
+          float t  = (float)k * stepUnits / dist;
+          Vec2  wp = {prev.x + t * dx, prev.y + t * dy};
+          result.strokes.push_back(Stroke{{wp, wp}, stroke.pen}); // two identical pts → dot
+        }
       }
     }
 
     result.strokes.push_back(stroke);
-    pen = stroke.points.back();
   }
 
   return result;
@@ -609,7 +611,7 @@ int main(int argc, char** argv) {
         g_fitRequested = true;
       }
       if (ImGui::IsKeyPressed(ImGuiKey_E) && !g_filePath.empty()) {
-        g_doc = fixLongPenUps(g_doc, g_penUpThreshold * 400.0f);
+        g_doc = fixLongPenUps(g_doc, g_penUpThreshold * 400.0f, g_fixStepCm * 400.0f);
         computeDocStats();
         g_penUpRenderer.upload(g_doc);
         g_fitRequested = true;
@@ -668,7 +670,7 @@ int main(int argc, char** argv) {
     ImGui::SeparatorText("Fix");
     ImGui::BeginDisabled(g_filePath.empty());
     if (ImGui::Button("Fix long pen-up jumps  [E]")) {
-      g_doc = fixLongPenUps(g_doc, g_penUpThreshold * 400.0f);
+      g_doc = fixLongPenUps(g_doc, g_penUpThreshold * 400.0f, g_fixStepCm * 400.0f);
       computeDocStats();
       g_penUpRenderer.upload(g_doc);
       g_fitRequested = true;
@@ -690,16 +692,17 @@ int main(int argc, char** argv) {
     }
     ImGui::EndDisabled();
     ImGui::EndDisabled();
-    ImGui::TextWrapped("Splits pen-up jumps longer than the threshold into waypoints.");
+    ImGui::SetNextItemWidth(150);
+    ImGui::SliderFloat("Threshold", &g_penUpThreshold, 1.0f, 200.0f, "%.0f cm");
+    ImGui::SetNextItemWidth(150);
+    ImGui::SliderFloat("Waypoint spacing", &g_fixStepCm, 0.5f, 20.0f, "%.1f cm");
+    if (!g_fixStatus.empty())
+      ImGui::TextWrapped("%s", g_fixStatus.c_str());
     if (!g_fixStatus.empty())
       ImGui::TextWrapped("%s", g_fixStatus.c_str());
 
     ImGui::SeparatorText("View");
     ImGui::Checkbox("Show pen-up moves", &g_showPenUp);
-    if (g_showPenUp) {
-      ImGui::SetNextItemWidth(150);
-      ImGui::SliderFloat("Long move threshold", &g_penUpThreshold, 0.0f, 200.0f, "%.0f cm");
-    }
     ImGui::Text("Scale: %.3f", g_scale);
     ImGui::SameLine();
     if (ImGui::Button("Fit"))
