@@ -123,6 +123,7 @@ static float g_rotation = 0.0f;
 static bool  g_showPenUp = false;
 static float g_penUpThreshold = 30.0f; // cm
 static float g_fixStepCm      =  3.0f; // cm between inserted waypoints
+static float g_fixLeftPct      = 100.0f; // % of doc width from left that is eligible
 
 // Framebuffer size (updated each frame)
 static int g_fbW = 0, g_fbH = 0;
@@ -224,15 +225,21 @@ static const char *kPenUpVertSrc = R"glsl(
 #version 330 core
 layout(location = 0) in vec2  aPos;    // HPGL coordinates
 layout(location = 1) in float aLenSq;  // squared segment length (HPGL units²)
+layout(location = 2) in float aStartX; // HPGL X of segment start (same for both verts)
+layout(location = 3) in float aDx;     // HPGL dx = end.x - start.x (same for both verts)
 
 uniform float uScale, uCosR, uSinR, uPanX, uPanY;
 uniform float uOriginX, uOriginY, uCanvasW, uCanvasH;
 uniform float uDispX, uDispY, uDispW, uDispH;  // ImGui DisplayPos / DisplaySize
 
 out float vLenSq;
+out float vStartX;
+out float vDx;
 
 void main() {
-    vLenSq = aLenSq;
+    vLenSq  = aLenSq;
+    vStartX = aStartX;
+    vDx     = aDx;
     // HPGL → rotated screen space (matches xfPoint() in CPU code)
     float lx = aPos.x * uScale + uPanX - uCanvasW * 0.5;
     float ly = aPos.y * uScale + uPanY - uCanvasH * 0.5;
@@ -249,14 +256,22 @@ void main() {
 static const char *kPenUpFragSrc = R"glsl(
 #version 330 core
 in float vLenSq;
+in float vStartX;
+in float vDx;
 uniform float uThresholdSq;
+uniform float uCutoffX;   // HPGL X cutoff (left-zone boundary)
 out vec4 fragColor;
 
 void main() {
-    if (vLenSq > uThresholdSq)
-        fragColor = vec4(220.0/255.0, 50.0/255.0, 50.0/255.0, 200.0/255.0);
+    bool isLong  = vLenSq  > uThresholdSq;
+    bool isLTR   = vDx     > 0.0;
+    bool inZone  = vStartX <= uCutoffX;
+    if (isLong && isLTR && inZone)
+        fragColor = vec4(220.0/255.0,  50.0/255.0,  50.0/255.0, 200.0/255.0); // red: will fix
+    else if (isLong)
+        fragColor = vec4(220.0/255.0, 150.0/255.0,  50.0/255.0, 180.0/255.0); // orange: long, skipped
     else
-        fragColor = vec4(60.0/255.0, 220.0/255.0, 100.0/255.0, 160.0/255.0);
+        fragColor = vec4( 60.0/255.0, 220.0/255.0, 100.0/255.0, 160.0/255.0); // green: short
 }
 )glsl";
 
@@ -269,11 +284,12 @@ struct PenUpRenderer {
   ImVec2 origin{};
   float  cW = 0, cH = 0;
   float  thresholdSq = 0;
+  float  cutoffX = 0;
   float  dispX = 0, dispY = 0, dispW = 1, dispH = 1; // ImGui DisplayPos/Size
 
   GLint uScale=-1, uCosR=-1, uSinR=-1, uPanX=-1, uPanY=-1;
   GLint uOriginX=-1, uOriginY=-1, uCanvasW=-1, uCanvasH=-1;
-  GLint uDispX=-1, uDispY=-1, uDispW=-1, uDispH=-1, uThresholdSq=-1;
+  GLint uDispX=-1, uDispY=-1, uDispW=-1, uDispH=-1, uThresholdSq=-1, uCutoffX=-1;
 
   void init() {
     auto compile = [](GLenum type, const char *src) -> GLuint {
@@ -305,6 +321,7 @@ struct PenUpRenderer {
     uDispW       = glGetUniformLocation(program, "uDispW");
     uDispH       = glGetUniformLocation(program, "uDispH");
     uThresholdSq = glGetUniformLocation(program, "uThresholdSq");
+    uCutoffX     = glGetUniformLocation(program, "uCutoffX");
 
     glGenVertexArrays(1, &vao);
     glGenBuffers(1, &vbo);
@@ -314,9 +331,9 @@ struct PenUpRenderer {
   // Call once after a new file is loaded.
   void upload(const HpglDoc &doc) {
     if (!valid) return;
-    // 3 floats per vertex: x, y, lenSq — 2 vertices per pen-up segment
+    // 5 floats per vertex: x, y, lenSq, startX, dx — 2 vertices per pen-up segment
     std::vector<float> data;
-    data.reserve(doc.strokes.size() * 6);
+    data.reserve(doc.strokes.size() * 10);
     for (size_t i = 0; i + 1 < doc.strokes.size(); ++i) {
       const auto &a = doc.strokes[i];
       const auto &b = doc.strokes[i + 1];
@@ -325,23 +342,30 @@ struct PenUpRenderer {
       float x1 = b.points.front().x, y1 = b.points.front().y;
       float dx = x1 - x0, dy = y1 - y0;
       float lenSq = dx*dx + dy*dy;
-      data.insert(data.end(), {x0, y0, lenSq, x1, y1, lenSq});
+      // startX and dx are identical for both vertices of the segment
+      data.insert(data.end(), {x0, y0, lenSq, x0, dx,
+                                x1, y1, lenSq, x0, dx});
     }
-    vertexCount = (int)(data.size() / 3);
+    vertexCount = (int)(data.size() / 5);
 
     glBindVertexArray(vao);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferData(GL_ARRAY_BUFFER,
                  (GLsizeiptr)(data.size() * sizeof(float)),
                  data.data(), GL_STATIC_DRAW);
+    constexpr int stride = 5 * sizeof(float);
     // attrib 0: vec2 position
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE,
-                          3 * sizeof(float), (void*)0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, stride, (void*)0);
     glEnableVertexAttribArray(0);
     // attrib 1: float lenSq
-    glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE,
-                          3 * sizeof(float), (void*)(2 * sizeof(float)));
+    glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, stride, (void*)(2 * sizeof(float)));
     glEnableVertexAttribArray(1);
+    // attrib 2: float startX
+    glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, stride, (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(2);
+    // attrib 3: float dx
+    glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, stride, (void*)(4 * sizeof(float)));
+    glEnableVertexAttribArray(3);
     glBindVertexArray(0);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
   }
@@ -363,6 +387,7 @@ struct PenUpRenderer {
     glUniform1f(uDispW,       dispW);
     glUniform1f(uDispH,       dispH);
     glUniform1f(uThresholdSq, thresholdSq);
+    glUniform1f(uCutoffX,     cutoffX);
     glBindVertexArray(vao);
     glDrawArrays(GL_LINES, 0, vertexCount);
     glBindVertexArray(0);
@@ -433,18 +458,25 @@ static void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW,
   // Pen-up moves — drawn via GPU VBO (one draw call for all segments)
   if (g_showPenUp && g_penUpRenderer.valid && g_penUpRenderer.vertexCount > 0) {
     float t = g_penUpThreshold * 400.0f; // cm → HPGL units (40 units/mm * 10 mm/cm)
+    float cx = g_doc.minX + (g_fixLeftPct / 100.0f) * (g_doc.maxX - g_doc.minX);
     ImVec2 dp = ImGui::GetMainViewport()->Pos;
     ImVec2 ds = ImGui::GetIO().DisplaySize;
     g_penUpRenderer.origin      = origin;
     g_penUpRenderer.cW          = canvasW;
     g_penUpRenderer.cH          = canvasH;
     g_penUpRenderer.thresholdSq = t * t;
+    g_penUpRenderer.cutoffX     = cx;
     g_penUpRenderer.dispX       = dp.x;
     g_penUpRenderer.dispY       = dp.y;
     g_penUpRenderer.dispW       = ds.x;
     g_penUpRenderer.dispH       = ds.y;
     dl->AddCallback(penUpRenderCallback, &g_penUpRenderer);
     dl->AddCallback(ImDrawCallback_ResetRenderState, nullptr);
+
+    // Draw vertical cutoff line in HPGL space
+    ImVec2 lineTop = xfPoint(cx, g_doc.minY, origin, canvasW, canvasH, cosR, sinR);
+    ImVec2 lineBot = xfPoint(cx, g_doc.maxY, origin, canvasW, canvasH, cosR, sinR);
+    dl->AddLine(lineTop, lineBot, IM_COL32(100, 200, 255, 200), 1.5f);
   }
 
   dl->PopClipRect();
@@ -458,7 +490,8 @@ static void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW,
 // along the direct path.  Mirrors the GPU renderer exactly: only
 // strokes[i-1].back() → strokes[i].front() moves are considered, so the
 // set of moves that get fixed matches the set shown in the visualisation.
-static HpglDoc fixLongPenUps(const HpglDoc &src, float thresholdUnits, float stepUnits) {
+static HpglDoc fixLongPenUps(const HpglDoc &src, float thresholdUnits, float stepUnits,
+                             float cutoffX) {
   HpglDoc result;
   result.minX = src.minX; result.maxX = src.maxX;
   result.minY = src.minY; result.maxY = src.maxY;
@@ -474,7 +507,7 @@ static HpglDoc fixLongPenUps(const HpglDoc &src, float thresholdUnits, float ste
       float dy   = dst.y - prev.y;
       float dist = sqrtf(dx*dx + dy*dy);
 
-      if (dist > thresholdUnits) {
+      if (dist > thresholdUnits && dx > 0.0f && prev.x <= cutoffX) {
         int steps = (int)(dist / stepUnits);
         for (int k = 1; k <= steps; ++k) {
           float t  = (float)k * stepUnits / dist;
@@ -611,7 +644,8 @@ int main(int argc, char** argv) {
         g_fitRequested = true;
       }
       if (ImGui::IsKeyPressed(ImGuiKey_E) && !g_filePath.empty()) {
-        g_doc = fixLongPenUps(g_doc, g_penUpThreshold * 400.0f, g_fixStepCm * 400.0f);
+        g_doc = fixLongPenUps(g_doc, g_penUpThreshold * 400.0f, g_fixStepCm * 400.0f,
+              g_doc.minX + (g_fixLeftPct / 100.0f) * (g_doc.maxX - g_doc.minX));
         computeDocStats();
         g_penUpRenderer.upload(g_doc);
         g_fitRequested = true;
@@ -670,7 +704,8 @@ int main(int argc, char** argv) {
     ImGui::SeparatorText("Fix");
     ImGui::BeginDisabled(g_filePath.empty());
     if (ImGui::Button("Fix long pen-up jumps  [E]")) {
-      g_doc = fixLongPenUps(g_doc, g_penUpThreshold * 400.0f, g_fixStepCm * 400.0f);
+      g_doc = fixLongPenUps(g_doc, g_penUpThreshold * 400.0f, g_fixStepCm * 400.0f,
+              g_doc.minX + (g_fixLeftPct / 100.0f) * (g_doc.maxX - g_doc.minX));
       computeDocStats();
       g_penUpRenderer.upload(g_doc);
       g_fitRequested = true;
@@ -696,6 +731,8 @@ int main(int argc, char** argv) {
     ImGui::SliderFloat("Threshold", &g_penUpThreshold, 1.0f, 200.0f, "%.0f cm");
     ImGui::SetNextItemWidth(150);
     ImGui::SliderFloat("Waypoint spacing", &g_fixStepCm, 0.5f, 20.0f, "%.1f cm");
+    ImGui::SetNextItemWidth(150);
+    ImGui::SliderFloat("Left zone", &g_fixLeftPct, 0.0f, 100.0f, "%.0f%%");
     if (!g_fixStatus.empty())
       ImGui::TextWrapped("%s", g_fixStatus.c_str());
     if (!g_fixStatus.empty())
