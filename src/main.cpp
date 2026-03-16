@@ -512,7 +512,7 @@ static HpglDoc fixLongPenUps(const HpglDoc &src, float thresholdUnits, float ste
         for (int k = 1; k <= steps; ++k) {
           float t  = (float)k * stepUnits / dist;
           Vec2  wp = {prev.x + t * dx, prev.y + t * dy};
-          result.strokes.push_back(Stroke{{wp, wp}, stroke.pen}); // two identical pts → dot
+          result.strokes.push_back(Stroke{{wp, wp}, 8}); // two identical pts → dot, pen 8
         }
       }
     }
