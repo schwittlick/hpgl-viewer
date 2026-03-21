@@ -799,28 +799,33 @@ int main(int argc, char** argv) {
                                ImGuiButtonFlags_MouseButtonMiddle);
     bool hovered = ImGui::IsItemHovered();
 
-    // Pan
+    // Pan — unrotate the screen-space delta into pre-rotation pan space
+    float cosR = cosf(g_rotation);
+    float sinR = sinf(g_rotation);
+    auto applyPanDelta = [&](ImVec2 d) {
+      g_panX += d.x * cosR + d.y * sinR;
+      g_panY += -d.x * sinR + d.y * cosR;
+    };
     if (hovered && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
-      ImVec2 d = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left, 0.0f);
-      g_panX += d.x;
-      g_panY += d.y;
+      applyPanDelta(ImGui::GetMouseDragDelta(ImGuiMouseButton_Left, 0.0f));
       ImGui::ResetMouseDragDelta(ImGuiMouseButton_Left);
     }
     if (hovered && ImGui::IsMouseDragging(ImGuiMouseButton_Middle)) {
-      ImVec2 d = ImGui::GetMouseDragDelta(ImGuiMouseButton_Middle, 0.0f);
-      g_panX += d.x;
-      g_panY += d.y;
+      applyPanDelta(ImGui::GetMouseDragDelta(ImGuiMouseButton_Middle, 0.0f));
       ImGui::ResetMouseDragDelta(ImGuiMouseButton_Middle);
     }
 
-    // Zoom toward cursor
+    // Zoom toward cursor — convert mouse canvas position to pre-rotation space first
     if (hovered && io.MouseWheel != 0.0f) {
       float factor = (io.MouseWheel > 0) ? 1.1f : 0.9f;
-      ImVec2 mp = io.MousePos;
-      float mx = mp.x - canvasPos.x;
-      float my = mp.y - canvasPos.y;
-      g_panX = mx - (mx - g_panX) * factor;
-      g_panY = my - (my - g_panY) * factor;
+      float mx = io.MousePos.x - canvasPos.x;
+      float my = io.MousePos.y - canvasPos.y;
+      float u  = mx - cW * 0.5f;
+      float v  = my - cH * 0.5f;
+      float px = u * cosR + v * sinR + cW * 0.5f;
+      float py = -u * sinR + v * cosR + cH * 0.5f;
+      g_panX = px - (px - g_panX) * factor;
+      g_panY = py - (py - g_panY) * factor;
       g_scale *= factor;
     }
 
