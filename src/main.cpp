@@ -121,9 +121,9 @@ static bool g_fitRequested = false;
 static float g_panX = 0, g_panY = 0, g_scale = 1.0f;
 static float g_rotation = 0.0f;
 static bool  g_showPenUp = false;
-static float g_penUpThreshold = 30.0f; // cm
-static float g_fixStepCm      =  3.0f; // cm between inserted waypoints
-static float g_fixLeftPct      = 100.0f; // % of doc width from left that is eligible
+static float g_penUpThreshold =  10.0f; // cm
+static float g_fixStepCm      =   2.0f; // cm between inserted waypoints
+static float g_fixLeftPct      =  15.0f; // % of doc width from left that is eligible
 
 // Framebuffer size (updated each frame)
 static int g_fbW = 0, g_fbH = 0;
