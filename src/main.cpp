@@ -476,76 +476,7 @@ static void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW,
 
 // ─── Pen-up fix + HPGL export
 // ────────────────────────────────────────────────────────────
-
-// For every inter-stroke pen-up move whose Euclidean length exceeds
-// thresholdUnits, insert single-point pen-down stops spaced stepUnits apart
-// along the direct path.  Mirrors the GPU renderer exactly: only
-// strokes[i-1].back() → strokes[i].front() moves are considered, so the
-// set of moves that get fixed matches the set shown in the visualisation.
-static HpglDoc fixLongPenUps(const HpglDoc &src, float thresholdUnits, float stepUnits,
-                             float cutoffX) {
-  HpglDoc result;
-  result.minX = src.minX; result.maxX = src.maxX;
-  result.minY = src.minY; result.maxY = src.maxY;
-
-  for (size_t i = 0; i < src.strokes.size(); ++i) {
-    const auto &stroke = src.strokes[i];
-    if (stroke.points.empty()) { result.strokes.push_back(stroke); continue; }
-
-    if (i > 0 && !src.strokes[i - 1].points.empty()) {
-      Vec2  prev = src.strokes[i - 1].points.back();
-      Vec2  dst  = stroke.points.front();
-      float dx   = dst.x - prev.x;
-      float dy   = dst.y - prev.y;
-      float dist = sqrtf(dx*dx + dy*dy);
-
-      if (dist > thresholdUnits && prev.x <= cutoffX) {
-        int steps = (int)(dist / stepUnits);
-        for (int k = 1; k <= steps; ++k) {
-          float t  = (float)k * stepUnits / dist;
-          Vec2  wp = {prev.x + t * dx, prev.y + t * dy};
-          result.strokes.push_back(Stroke{{wp, wp}, 8}); // two identical pts → dot, pen 8
-        }
-      }
-    }
-
-    result.strokes.push_back(stroke);
-  }
-
-  return result;
-}
-
-// Write doc as HPGL. Single-point strokes become a pen-down touch (PD with
-// no coordinates = mark at current position after PU moves there).
-static bool exportHpgl(const HpglDoc &doc, const std::string &path) {
-  FILE *f = fopen(path.c_str(), "w");
-  if (!f) return false;
-
-  fprintf(f, "IN;\n");
-  int curPen = -1;
-  for (const auto &stroke : doc.strokes) {
-    if (stroke.points.empty()) continue;
-    if (stroke.pen != curPen) {
-      fprintf(f, "SP%d;\n", stroke.pen);
-      curPen = stroke.pen;
-    }
-    const Vec2 &s = stroke.points.front();
-    fprintf(f, "PU%.0f,%.0f;", s.x, s.y);
-    if (stroke.points.size() == 1) {
-      fprintf(f, "PD;\n");
-    } else {
-      fprintf(f, "PD");
-      for (size_t i = 1; i < stroke.points.size(); ++i) {
-        if (i > 1) fputc(',', f);
-        fprintf(f, "%.0f,%.0f", stroke.points[i].x, stroke.points[i].y);
-      }
-      fprintf(f, ";\n");
-    }
-  }
-  fprintf(f, "PU;\n");
-  fclose(f);
-  return true;
-}
+#include "hpgl_fix.h"
 
 // Derive output path: insert "_fixed" before the last extension.
 static std::string fixedPath(const std::string &src) {

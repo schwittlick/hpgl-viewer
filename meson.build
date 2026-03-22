@@ -38,6 +38,14 @@ test_exe = executable('test_hpgl_parser',
 
 test('hpgl parser', test_exe)
 
+fix_test_exe = executable('test_hpgl_fix',
+  sources : ['tests/test_hpgl_fix.cpp'],
+  link_with : parser_lib,
+  include_directories : include_directories('src'))
+
+test('hpgl fix', fix_test_exe,
+  args : [meson.source_root() / 'tests/data'])
+
 # ── Desktop integration ───────────────────────────────────────────────────────
 
 install_data('data/hpgl-viewer.desktop',
