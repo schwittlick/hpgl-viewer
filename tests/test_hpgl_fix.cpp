@@ -128,7 +128,7 @@ static void test_export_roundtrip_preserves_strokes() {
 // Integration: fix the real data file, export, re-read, verify pen 8 + SP0
 
 static void test_fix_data_file_has_pen8_and_sp0() {
-  std::string inPath = g_dataDir + "/composition100_manual_0b56ffcd_hp7550a_a3__256a341b_251010_135033_4.hpgl";
+  std::string inPath = g_dataDir + "/composition100_manual_14d5a114_mutoh_xp500_a1__b2601bb5_260214_102422_0.hpgl";
   HpglDoc doc = HpglParser{}.parseFile(inPath);
   REQUIRE(!doc.empty());
 
