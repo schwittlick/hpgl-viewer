@@ -78,35 +78,29 @@ static std::string openFileDialog() {
   if (!startDir.empty() && startDir.back() != '/')
     startDir += '/';
 
-  std::string kdialog = "kdialog --getopenfilename '";
-  kdialog += startDir.empty() ? "." : startDir;
-  kdialog += "' '*.hpgl *.plt *.hgl' 2>/dev/null";
+  std::string cmd = "kdialog --getopenfilename '";
+  cmd += startDir.empty() ? "." : startDir;
+  cmd += "' '*.hpgl *.plt *.hgl' 2>/dev/null";
 
-  for (const std::string &cmd : {kdialog}) {
-    FILE *f = popen(cmd.c_str(), "r");
-    if (!f)
-      continue;
-    std::array<char, 4096> buf{};
-    fgets(buf.data(), buf.size(), f);
-    int rc = pclose(f);
-    if (rc != 0)
-      continue;
-    std::string path(buf.data());
-    if (!path.empty() && path.back() == '\n')
-      path.pop_back();
-    if (!path.empty()) {
-      g_lastOpenDir = fs::path(path).parent_path().string();
-      configSave("last_open_dir", g_lastOpenDir);
-      return path;
-    }
+  FILE *f = popen(cmd.c_str(), "r");
+  if (!f) return {};
+  std::array<char, 4096> buf{};
+  fgets(buf.data(), buf.size(), f);
+  int rc = pclose(f);
+  if (rc != 0) return {};
+
+  std::string path(buf.data());
+  if (!path.empty() && path.back() == '\n')
+    path.pop_back();
+  if (!path.empty()) {
+    g_lastOpenDir = fs::path(path).parent_path().string();
+    configSave("last_open_dir", g_lastOpenDir);
   }
-  return {};
+  return path;
 }
 
 // ─── App state
 // ────────────────────────────────────────────────────────────────
-
-static constexpr float kHpglUnitsPerMm = 40.0f;
 
 struct PenStyle {
   ImVec4 color = {0.1f, 0.1f, 0.1f, 1.0f};
@@ -387,19 +381,28 @@ static void penUpRenderCallback(const ImDrawList*, const ImDrawCmd *cmd) {
 
   // Convert ImGui clip rect to GL scissor (framebuffer coords, y-flipped).
   ImDrawData *dd = ImGui::GetDrawData();
-  float sx = dd->FramebufferScale.x, sy = dd->FramebufferScale.y;
-  float ox = dd->DisplayPos.x,       oy = dd->DisplayPos.y;
-  int clipX = (int)((cmd->ClipRect.x - ox) * sx);
-  int clipY = (int)((cmd->ClipRect.y - oy) * sy);
-  int clipZ = (int)((cmd->ClipRect.z - ox) * sx);
-  int clipW = (int)((cmd->ClipRect.w - oy) * sy);
-  glScissor(clipX, g_fbH - clipW, clipZ - clipX, clipW - clipY);
+  float scaleX = dd->FramebufferScale.x, scaleY = dd->FramebufferScale.y;
+  float ox = dd->DisplayPos.x,           oy     = dd->DisplayPos.y;
+  int x1 = (int)((cmd->ClipRect.x - ox) * scaleX);
+  int y1 = (int)((cmd->ClipRect.y - oy) * scaleY);
+  int x2 = (int)((cmd->ClipRect.z - ox) * scaleX);
+  int y2 = (int)((cmd->ClipRect.w - oy) * scaleY);
+  glScissor(x1, g_fbH - y2, x2 - x1, y2 - y1);
 
   r->draw();
 }
 
 // ─── Drawing
 // ──────────────────────────────────────────────────────────────────
+
+// Undo canvas rotation around its centre: screen-relative coords → pre-rotation coords.
+static ImVec2 unrotateCanvas(float mx, float my, float cW, float cH,
+                              float cosR, float sinR) {
+  float u = mx - cW * 0.5f;
+  float v = my - cH * 0.5f;
+  return {u * cosR + v * sinR + cW * 0.5f,
+         -u * sinR + v * cosR + cH * 0.5f};
+}
 
 static ImVec2 xfPoint(float hx, float hy, ImVec2 origin, float cW, float cH,
                       float cosR, float sinR) {
@@ -443,7 +446,7 @@ static void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW,
 
   // Pen-up moves — drawn via GPU VBO (one draw call for all segments)
   if (g_showPenUp && g_penUpRenderer.valid && g_penUpRenderer.vertexCount > 0) {
-    float t = g_penUpThreshold * 400.0f; // cm → HPGL units (40 units/mm * 10 mm/cm)
+    float t = g_penUpThreshold * kHpglUnitsPerCm;
     float cx = g_doc.minX + (g_fixLeftPct / 100.0f) * (g_doc.maxX - g_doc.minX);
     ImVec2 dp = ImGui::GetMainViewport()->Pos;
     ImVec2 ds = ImGui::GetIO().DisplaySize;
@@ -496,6 +499,34 @@ static void applyDefaultLayout(ImGuiID dockspace_id) {
   ImGui::DockBuilderFinish(dockspace_id);
 }
 
+// ─── Actions
+// ─────────────────────────────────────────────────────────────────────
+
+static void loadFile(const std::string &path) {
+  g_filePath = path;
+  strncpy(g_filePathBuf, path.c_str(), sizeof(g_filePathBuf) - 1);
+  g_filePathBuf[sizeof(g_filePathBuf) - 1] = '\0';
+  g_doc = HpglParser{}.parseFile(path);
+  refreshDocStats();
+  g_penUpRenderer.upload(g_doc);
+  g_fitRequested = true;
+  g_hasFixed = false;
+  g_fixStatus.clear();
+}
+
+static void applyFix() {
+  float cutoff = g_doc.minX + (g_fixLeftPct / 100.0f) * (g_doc.maxX - g_doc.minX);
+  g_doc = fixLongPenUps(g_doc,
+                        g_penUpThreshold * kHpglUnitsPerCm,
+                        g_fixStepCm      * kHpglUnitsPerCm,
+                        cutoff);
+  refreshDocStats();
+  g_penUpRenderer.upload(g_doc);
+  g_fitRequested = true;
+  g_hasFixed = true;
+  g_fixStatus = "Fixed (not yet saved)";
+}
+
 // ─── Main
 // ─────────────────────────────────────────────────────────────────────
 
@@ -529,14 +560,8 @@ int main(int argc, char** argv) {
   initPenColors();
   g_lastOpenDir = configLoad("last_open_dir");
 
-  if (argc > 1) {
-      g_filePath = argv[1];
-      strncpy(g_filePathBuf, g_filePath.c_str(), sizeof(g_filePathBuf) - 1);
-      g_doc = HpglParser{}.parseFile(g_filePath);
-      refreshDocStats();
-      g_penUpRenderer.upload(g_doc);
-      g_fitRequested = true;
-  }
+  if (argc > 1)
+    loadFile(argv[1]);
 
   while (!glfwWindowShouldClose(window)) {
     glfwWaitEvents();
@@ -559,27 +584,11 @@ int main(int argc, char** argv) {
         g_rotation += static_cast<float>(M_PI_2);
         g_fitRequested = true;
       }
-      if (ImGui::IsKeyPressed(ImGuiKey_E) && !g_filePath.empty()) {
-        g_doc = fixLongPenUps(g_doc, g_penUpThreshold * 400.0f, g_fixStepCm * 400.0f,
-              g_doc.minX + (g_fixLeftPct / 100.0f) * (g_doc.maxX - g_doc.minX));
-        refreshDocStats();
-        g_penUpRenderer.upload(g_doc);
-        g_fitRequested = true;
-        g_hasFixed = true;
-        g_fixStatus = "Fixed (not yet saved)";
-      }
+      if (ImGui::IsKeyPressed(ImGuiKey_E) && !g_filePath.empty())
+        applyFix();
       if (ImGui::IsKeyPressed(ImGuiKey_O)) {
         std::string path = openFileDialog();
-        if (!path.empty()) {
-          g_filePath = path;
-          strncpy(g_filePathBuf, path.c_str(), sizeof(g_filePathBuf) - 1);
-          g_doc = HpglParser{}.parseFile(g_filePath);
-          refreshDocStats();
-          g_penUpRenderer.upload(g_doc);
-          g_fitRequested = true;
-          g_hasFixed = false;
-          g_fixStatus.clear();
-        }
+        if (!path.empty()) loadFile(path);
       }
     }
 
@@ -613,15 +622,8 @@ int main(int argc, char** argv) {
     ImGui::SeparatorText("File");
     ImGui::InputText("##path", g_filePathBuf, sizeof(g_filePathBuf));
     ImGui::SameLine();
-    if (ImGui::Button("Open")) {
-      g_filePath = g_filePathBuf;
-      g_doc = HpglParser{}.parseFile(g_filePath);
-      refreshDocStats();
-      g_penUpRenderer.upload(g_doc);
-      g_fitRequested = true;
-      g_hasFixed = false;
-      g_fixStatus.clear();
-    }
+    if (ImGui::Button("Open"))
+      loadFile(g_filePathBuf);
     if (!g_filePath.empty()) {
       ImGui::TextDisabled("%s", g_filePath.c_str());
       ImGui::Text("Strokes: %zu", g_doc.strokes.size());
@@ -631,15 +633,8 @@ int main(int argc, char** argv) {
 
     ImGui::SeparatorText("Fix");
     ImGui::BeginDisabled(g_filePath.empty());
-    if (ImGui::Button("Fix long pen-up jumps  [E]")) {
-      g_doc = fixLongPenUps(g_doc, g_penUpThreshold * 400.0f, g_fixStepCm * 400.0f,
-              g_doc.minX + (g_fixLeftPct / 100.0f) * (g_doc.maxX - g_doc.minX));
-      refreshDocStats();
-      g_penUpRenderer.upload(g_doc);
-      g_fitRequested = true;
-      g_hasFixed = true;
-      g_fixStatus = "Fixed (not yet saved)";
-    }
+    if (ImGui::Button("Fix long pen-up jumps  [E]"))
+      applyFix();
     ImGui::BeginDisabled(!g_hasFixed);
     ImGui::SameLine();
     if (ImGui::Button("Export")) {
@@ -744,10 +739,7 @@ int main(int argc, char** argv) {
       float factor = (io.MouseWheel > 0) ? 1.1f : 0.9f;
       float mx = io.MousePos.x - canvasPos.x;
       float my = io.MousePos.y - canvasPos.y;
-      float u  = mx - cW * 0.5f;
-      float v  = my - cH * 0.5f;
-      float px = u * cosR + v * sinR + cW * 0.5f;
-      float py = -u * sinR + v * cosR + cH * 0.5f;
+      auto [px, py] = unrotateCanvas(mx, my, cW, cH, cosR, sinR);
       g_panX = px - (px - g_panX) * factor;
       g_panY = py - (py - g_panY) * factor;
       g_scale *= factor;
@@ -786,15 +778,10 @@ int main(int argc, char** argv) {
     if (hovered) {
       float mx = io.MousePos.x - canvasPos.x;
       float my = io.MousePos.y - canvasPos.y;
-      // Undo rotation around canvas centre
-      float u = mx - cW * 0.5f;
-      float v = my - cH * 0.5f;
-      float rx =  u * cosR + v * sinR + cW * 0.5f;
-      float ry = -u * sinR + v * cosR + cH * 0.5f;
-      // Undo scale + pan
-      float px = (rx - g_panX) / g_scale;
-      float py = (ry - g_panY) / g_scale;
-      ImGui::SetTooltip("%.0f, %.0f", px, py);
+      auto [rx, ry] = unrotateCanvas(mx, my, cW, cH, cosR, sinR);
+      ImGui::SetTooltip("%.0f, %.0f",
+                        (rx - g_panX) / g_scale,
+                        (ry - g_panY) / g_scale);
     }
 
     ImGui::End();

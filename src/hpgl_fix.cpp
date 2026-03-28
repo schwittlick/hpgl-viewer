@@ -3,7 +3,6 @@
 #include <cmath>
 #include <cstdio>
 
-static constexpr float kHpglUnitsPerMm = 40.0f;
 
 HpglDoc fixLongPenUps(const HpglDoc &src, float thresholdUnits,
                       float stepUnits, float cutoffX) {
@@ -71,7 +70,8 @@ bool exportHpgl(const HpglDoc &doc, const std::string &path) {
 
 DocStats computeDocStats(const HpglDoc &doc) {
   DocStats stats;
-  stats.numPaths = static_cast<int>(doc.strokes.size());
+  for (const auto &s : doc.strokes)
+    if (!s.points.empty()) ++stats.numPaths;
 
   for (const auto &s : doc.strokes) {
     for (size_t i = 0; i + 1 < s.points.size(); ++i) {

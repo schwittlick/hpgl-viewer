@@ -2,25 +2,6 @@
 #include "../src/hpgl_parser.h"
 #include "test_harness.h"
 
-#include <cstring>
-#include <fstream>
-#include <sstream>
-#include <string>
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-static std::string readFile(const std::string &path) {
-  std::ifstream f(path);
-  std::ostringstream ss;
-  ss << f.rdbuf();
-  return ss.str();
-}
-
-static bool endsWith(const std::string &s, const std::string &suffix) {
-  return s.size() >= suffix.size() &&
-         s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
-}
-
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 static std::string g_dataDir;
@@ -116,8 +97,8 @@ static void test_fix_data_file_has_pen8_and_sp0() {
   REQUIRE(!doc.empty());
 
   // threshold=10 cm, step=2 cm, cutoff=100% of width
-  float threshold = 10.f * 10.f * 40.f;  // 10 cm in HPGL units
-  float step      =  2.f * 10.f * 40.f;
+  float threshold = 10.f * kHpglUnitsPerCm;
+  float step      =  2.f * kHpglUnitsPerCm;
   float cutoff    = doc.maxX;
   HpglDoc fixed   = fixLongPenUps(doc, threshold, step, cutoff);
 
@@ -195,6 +176,15 @@ static void test_stats_empty_strokes_ignored_in_pen_up() {
   REQUIRE(s.penUpMm == 0.0f); // empty stroke breaks the chain
 }
 
+static void test_stats_num_paths_excludes_empty_strokes() {
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}}, 1}); // real
+  doc.strokes.push_back(Stroke{{}, 1});            // empty — must not be counted
+  doc.strokes.push_back(Stroke{{{1.f, 0.f}}, 1}); // real
+  DocStats s = computeDocStats(doc);
+  REQUIRE(s.numPaths == 2); // only the two non-empty strokes
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 int main(int argc, char **argv) {
@@ -211,6 +201,7 @@ int main(int argc, char **argv) {
   run("stats pen-up gap between strokes",     test_stats_pen_up_gap_between_strokes);
   run("stats multiple strokes",               test_stats_multiple_strokes);
   run("stats empty strokes ignored in pen-up",test_stats_empty_strokes_ignored_in_pen_up);
+  run("stats numPaths excludes empty strokes", test_stats_num_paths_excludes_empty_strokes);
 
   printf("\n%d/%d passed\n", g_pass, g_pass + g_fail);
   return g_fail > 0 ? 1 : 0;

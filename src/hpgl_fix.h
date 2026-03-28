@@ -4,7 +4,9 @@
 
 #include <string>
 
-static constexpr int kWaypointPen = 8;
+inline constexpr float kHpglUnitsPerMm = 40.0f;
+inline constexpr float kHpglUnitsPerCm = kHpglUnitsPerMm * 10.0f;
+inline constexpr int   kWaypointPen    = 8;
 
 // For every inter-stroke pen-up move whose Euclidean length exceeds
 // thresholdUnits, insert single-point pen-down stops (pen kWaypointPen) spaced
@@ -18,10 +20,11 @@ HpglDoc fixLongPenUps(const HpglDoc &src, float thresholdUnits,
 bool exportHpgl(const HpglDoc &doc, const std::string &path);
 
 struct DocStats {
-  int   numPaths    = 0;
-  float penDownMm   = 0.0f;
-  float penUpMm     = 0.0f;
+  int   numPaths  = 0;
+  float penDownMm = 0.0f;
+  float penUpMm   = 0.0f;
 };
 
 // Compute path count and total pen-down / pen-up travel in millimetres.
+// Empty strokes (no points) are excluded from numPaths.
 DocStats computeDocStats(const HpglDoc &doc);

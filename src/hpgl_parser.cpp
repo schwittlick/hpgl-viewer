@@ -74,11 +74,6 @@ void HpglParser::handlePD(const std::string &params) {
   penDown = true;
   auto v = parseCoords(params);
   ensureStroke();
-  auto &s = doc.strokes[curIdx];
-  if (s.points.empty()) {
-    s.points.push_back({cx, cy});
-    updateBounds(cx, cy);
-  }
   for (size_t i = 0; i + 1 < v.size(); i += 2) {
     cx = v[i];
     cy = v[i + 1];
@@ -92,11 +87,6 @@ void HpglParser::handlePA(const std::string &params) {
   for (size_t i = 0; i + 1 < v.size(); i += 2) {
     if (penDown) {
       ensureStroke();
-      auto &s = doc.strokes[curIdx];
-      if (s.points.empty()) {
-        s.points.push_back({cx, cy});
-        updateBounds(cx, cy);
-      }
       cx = v[i];
       cy = v[i + 1];
       doc.strokes[curIdx].points.push_back({cx, cy});
