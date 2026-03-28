@@ -28,3 +28,7 @@ struct DocStats {
 // Compute path count and total pen-down / pen-up travel in millimetres.
 // Empty strokes (no points) are excluded from numPaths.
 DocStats computeDocStats(const HpglDoc &doc);
+
+// Derive the output path for an exported fix: inserts "_fixed" before the
+// last extension, or appends "_fixed.hpgl" if there is no extension.
+std::string fixedPath(const std::string &src);

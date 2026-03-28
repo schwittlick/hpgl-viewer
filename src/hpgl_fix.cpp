@@ -70,25 +70,31 @@ bool exportHpgl(const HpglDoc &doc, const std::string &path) {
 
 DocStats computeDocStats(const HpglDoc &doc) {
   DocStats stats;
-  for (const auto &s : doc.strokes)
-    if (!s.points.empty()) ++stats.numPaths;
-
+  const Stroke *prev = nullptr; // last non-empty stroke seen
   for (const auto &s : doc.strokes) {
+    if (s.points.empty()) continue;
+    ++stats.numPaths;
+    // pen-down distance within this stroke
     for (size_t i = 0; i + 1 < s.points.size(); ++i) {
       float dx = s.points[i+1].x - s.points[i].x;
       float dy = s.points[i+1].y - s.points[i].y;
       stats.penDownMm += sqrtf(dx*dx + dy*dy);
     }
-  }
-  for (size_t i = 0; i + 1 < doc.strokes.size(); ++i) {
-    const auto &a = doc.strokes[i];
-    const auto &b = doc.strokes[i+1];
-    if (a.points.empty() || b.points.empty()) continue;
-    float dx = b.points.front().x - a.points.back().x;
-    float dy = b.points.front().y - a.points.back().y;
-    stats.penUpMm += sqrtf(dx*dx + dy*dy);
+    // pen-up gap from the end of the previous stroke to the start of this one
+    if (prev) {
+      float dx = s.points.front().x - prev->points.back().x;
+      float dy = s.points.front().y - prev->points.back().y;
+      stats.penUpMm += sqrtf(dx*dx + dy*dy);
+    }
+    prev = &s;
   }
   stats.penDownMm /= kHpglUnitsPerMm;
   stats.penUpMm   /= kHpglUnitsPerMm;
   return stats;
+}
+
+std::string fixedPath(const std::string &src) {
+  auto dot = src.rfind('.');
+  if (dot == std::string::npos) return src + "_fixed.hpgl";
+  return src.substr(0, dot) + "_fixed" + src.substr(dot);
 }

@@ -64,6 +64,9 @@ void HpglParser::handlePU(const std::string &params) {
   penDown = false;
   curIdx = -1;
   auto v = parseCoords(params);
+  // HPGL allows multiple coordinate pairs on PU, but only the final position
+  // matters (no pen-down stroke is produced). All intermediate positions are
+  // intentionally discarded.
   for (size_t i = 0; i + 1 < v.size(); i += 2) {
     cx = v[i];
     cy = v[i + 1];

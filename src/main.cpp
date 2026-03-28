@@ -73,13 +73,23 @@ static void configSave(const std::string &key, const std::string &value) {
 
 static std::string g_lastOpenDir;
 
+// Shell-escape a string for single-quoted insertion: replace ' with '\''
+static std::string shellEscapeSingleQuoted(const std::string &s) {
+  std::string out;
+  for (char c : s) {
+    if (c == '\'') out += "'\\''";
+    else           out += c;
+  }
+  return out;
+}
+
 static std::string openFileDialog() {
   std::string startDir = g_lastOpenDir;
   if (!startDir.empty() && startDir.back() != '/')
     startDir += '/';
 
   std::string cmd = "kdialog --getopenfilename '";
-  cmd += startDir.empty() ? "." : startDir;
+  cmd += shellEscapeSingleQuoted(startDir.empty() ? "." : startDir);
   cmd += "' '*.hpgl *.plt *.hgl' 2>/dev/null";
 
   FILE *f = popen(cmd.c_str(), "r");
@@ -109,7 +119,7 @@ struct PenStyle {
 
 static HpglDoc g_doc;
 static std::string g_filePath;
-static char g_filePathBuf[1024] = "";
+static char g_filePathBuf[4096] = ""; // PATH_MAX on Linux
 static bool g_fitRequested = false;
 
 // pan/zoom/rotation state
@@ -473,13 +483,6 @@ static void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW,
 
 // ─── Pen-up fix + HPGL export
 // ────────────────────────────────────────────────────────────
-
-// Derive output path: insert "_fixed" before the last extension.
-static std::string fixedPath(const std::string &src) {
-  auto dot = src.rfind('.');
-  if (dot == std::string::npos) return src + "_fixed.hpgl";
-  return src.substr(0, dot) + "_fixed" + src.substr(dot);
-}
 
 static std::string g_fixStatus;  // shown in sidebar after fix/export
 static bool        g_hasFixed = false; // true when g_doc holds a fixed (unsaved) result

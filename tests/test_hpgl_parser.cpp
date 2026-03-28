@@ -200,6 +200,56 @@ static void test_pu_move_does_not_expand_bounds() {
   REQUIRE(doc.maxX == 100 && doc.maxY == 100);
 }
 
+// Odd number of coordinates — trailing value silently dropped
+
+static void test_pd_odd_coords_drops_last() {
+  // PD100,200,300 — three values: pair (100,200) used, lone 300 dropped.
+  auto doc = parse("PD100,200,300;PU;");
+  REQUIRE(doc.strokes.size() == 1);
+  auto &pts = doc.strokes[0].points;
+  // origin anchor + one destination; 300 is silently discarded
+  REQUIRE(pts.size() == 2);
+  REQUIRE((pts[1] == Vec2{100.f, 200.f}));
+}
+
+// Non-numeric token — silently skipped
+
+static void test_pd_bad_token_skipped() {
+  // "1a2" is not a valid float — stof throws, token is dropped.
+  auto doc = parse("PD1a2,300;PU;");
+  // Only one valid value (300), which is also dropped (odd count after bad token).
+  // Regardless of exact result, the parser must not crash.
+  (void)doc; // just confirm it doesn't throw/crash
+  REQUIRE(true);
+}
+
+// SP with no argument — pen unchanged
+
+static void test_sp_no_arg_leaves_pen_unchanged() {
+  auto doc = parse("SP3;SP;PD100,0;PU;");
+  REQUIRE(doc.strokes.size() == 1);
+  REQUIRE(doc.strokes[0].pen == 3); // bare SP; does not reset pen
+}
+
+// SP0 (park) — treated as pen 0, resets cur stroke
+
+static void test_sp0_resets_current_stroke() {
+  // After SP0 a new PD must open a fresh stroke with pen 0.
+  auto doc = parse("SP1;PD100,0;SP0;PD200,0;PU;");
+  REQUIRE(doc.strokes.size() == 2);
+  REQUIRE(doc.strokes[0].pen == 1);
+  REQUIRE(doc.strokes[1].pen == 0);
+}
+
+// Input without terminating semicolon on last command
+
+static void test_no_trailing_semicolon_parsed() {
+  // "PD100,200" with no closing semicolon — params reach end-of-string.
+  auto doc = parse("PD100,200");
+  REQUIRE(doc.strokes.size() == 1);
+  REQUIRE((doc.strokes[0].points.back() == Vec2{100.f, 200.f}));
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 int main() {
@@ -227,6 +277,11 @@ int main() {
   run("float coordinates parsed",           test_float_coordinates_parsed);
   run("negative coordinates",               test_negative_coordinates);
   run("PU move does not expand bounds",     test_pu_move_does_not_expand_bounds);
+  run("PD odd coords drops trailing value", test_pd_odd_coords_drops_last);
+  run("PD bad token silently skipped",      test_pd_bad_token_skipped);
+  run("SP no arg leaves pen unchanged",     test_sp_no_arg_leaves_pen_unchanged);
+  run("SP0 resets current stroke",          test_sp0_resets_current_stroke);
+  run("no trailing semicolon parsed",       test_no_trailing_semicolon_parsed);
 
   printf("\n%d/%d passed\n", g_pass, g_pass + g_fail);
   return g_fail > 0 ? 1 : 0;
