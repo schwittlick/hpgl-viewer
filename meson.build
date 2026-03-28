@@ -7,6 +7,7 @@ project('hpgl-viewer', 'cpp',
 glfw_dep  = dependency('glfw3')
 gl_dep    = dependency('gl')
 opengl_dep = dependency('opengl', required: false)
+png_dep   = dependency('libpng')
 
 # ── ImGui (vendored or system) ────────────────────────────────────────────────
 # We expect imgui sources in subprojects/imgui/ (wrap or manual clone).
@@ -42,11 +43,17 @@ renderer_lib = static_library('hpgl_renderer',
   include_directories : include_directories('src'),
   dependencies : [glfw_dep, gl_dep, imgui_dep])
 
+export_png_lib = static_library('hpgl_export_png',
+  sources : ['src/export_png.cpp'],
+  link_with : [parser_lib, fix_lib, renderer_lib],
+  include_directories : include_directories('src'),
+  dependencies : [png_dep, imgui_dep])
+
 executable('hpgl-viewer',
   sources : ['src/main.cpp'],
-  link_with : [parser_lib, fix_lib, config_lib, view_lib, renderer_lib],
+  link_with : [parser_lib, fix_lib, config_lib, view_lib, renderer_lib, export_png_lib],
   include_directories : include_directories('src'),
-  dependencies : [glfw_dep, gl_dep, imgui_dep],
+  dependencies : [glfw_dep, gl_dep, imgui_dep, png_dep],
   install : true)
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
@@ -87,6 +94,14 @@ renderer_test_exe = executable('test_renderer',
   dependencies : [glfw_dep, gl_dep, imgui_dep])
 
 test('renderer', renderer_test_exe)
+
+export_png_test_exe = executable('test_export_png',
+  sources : ['tests/test_export_png.cpp'],
+  link_with : [parser_lib, fix_lib, renderer_lib, export_png_lib],
+  include_directories : include_directories('src'),
+  dependencies : [png_dep, imgui_dep])
+
+test('export png', export_png_test_exe)
 
 # ── Desktop integration ───────────────────────────────────────────────────────
 

@@ -6,6 +6,7 @@
 #include <string>
 
 #include "config.h"
+#include "export_png.h"
 #include "hpgl_fix.h"
 #include "hpgl_parser.h"
 #include "renderer.h"
@@ -361,6 +362,24 @@ int main(int argc, char** argv) {
     }
     ImGui::EndDisabled();
     ImGui::EndDisabled();
+
+    ImGui::SeparatorText("Export");
+    ImGui::BeginDisabled(g_activeLayer < 0);
+    if (ImGui::Button("Export PNG")) {
+      HpglDoc merged = mergedDoc();
+      std::string pngPath;
+      if (g_activeLayer >= 0)
+        pngPath = fs::path(g_layers[g_activeLayer].path)
+                      .replace_extension(".png").string();
+      else
+        pngPath = "export.png";
+      if (exportPng(merged, g_pens, pngPath))
+        g_fixStatus = "PNG saved: " + pngPath;
+      else
+        g_fixStatus = "PNG export failed: " + pngPath;
+    }
+    ImGui::EndDisabled();
+
     ImGui::SetNextItemWidth(150);
     ImGui::SliderFloat("Threshold", &g_penUpThreshold, 1.0f, 200.0f, "%.0f cm");
     ImGui::SetNextItemWidth(150);
