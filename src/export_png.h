@@ -10,4 +10,4 @@
 // pens[0..7] supplies the pen colours and thicknesses.
 // Returns true on success.
 bool exportPng(const HpglDoc &doc, const PenStyle pens[8],
-               const std::string &path, float dpi = 600.f);
+               const std::string &path, float dpi = 300.f);
