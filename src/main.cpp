@@ -2,7 +2,6 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
-#include <cstring>
 #include <filesystem>
 #include <string>
 
@@ -52,8 +51,15 @@ static std::string openFileDialog() {
 // ─── App state
 // ────────────────────────────────────────────────────────────────
 
-static HpglDoc g_doc;
-static std::string g_filePath;
+struct Layer {
+  HpglDoc     doc;
+  std::string path;
+  bool        visible  = true;
+  bool        hasFixed = false;
+};
+
+static std::vector<Layer> g_layers;
+static int  g_activeLayer = -1; // index of layer targeted by fix/export
 static char g_filePathBuf[4096] = ""; // PATH_MAX on Linux
 static bool g_fitRequested = false;
 
@@ -69,9 +75,8 @@ static float g_fixLeftPct      =  15.0f; // % of doc width from left that is eli
 // Framebuffer size (updated each frame)
 static int g_fbW = 0, g_fbH = 0;
 
-// Cached doc stats (recomputed on load)
+// Cached doc stats (recomputed on load/change)
 static DocStats g_stats;
-static void refreshDocStats() { g_stats = computeDocStats(g_doc); }
 
 // fullscreen state
 static bool g_isFullscreen = false;
@@ -81,29 +86,38 @@ static int g_windowedW = 1400, g_windowedH = 900;
 // pen styles (up to 8 pens)
 static PenStyle g_pens[8];
 
-static void toggleFullscreen(GLFWwindow *window) {
-  if (!g_isFullscreen) {
-    glfwGetWindowPos(window, &g_windowedX, &g_windowedY);
-    glfwGetWindowSize(window, &g_windowedW, &g_windowedH);
-    GLFWmonitor *monitor = glfwGetPrimaryMonitor();
-    const GLFWvidmode *mode = glfwGetVideoMode(monitor);
-    glfwSetWindowMonitor(window, monitor, 0, 0, mode->width, mode->height,
-                         mode->refreshRate);
-    g_isFullscreen = true;
-  } else {
-    glfwSetWindowMonitor(window, nullptr, g_windowedX, g_windowedY,
-                         g_windowedW, g_windowedH, 0);
-    g_isFullscreen = false;
+static std::string g_fixStatus;
+
+// ─── Layer helpers
+// ───────────────────────────────────────────────────────────
+
+// Combine all visible layer strokes into one doc for rendering / pen-up GPU.
+static HpglDoc mergedDoc() {
+  HpglDoc m;
+  for (const auto &l : g_layers) {
+    if (!l.visible) continue;
+    for (const auto &s : l.doc.strokes)
+      m.strokes.push_back(s);
+    if (!l.doc.empty()) {
+      m.minX = std::min(m.minX, l.doc.minX);
+      m.minY = std::min(m.minY, l.doc.minY);
+      m.maxX = std::max(m.maxX, l.doc.maxX);
+      m.maxY = std::max(m.maxY, l.doc.maxY);
+    }
   }
+  if (m.minX > m.maxX) { m.minX = m.minY = 0; m.maxX = m.maxY = 1; }
+  return m;
 }
 
 static PenUpRenderer g_penUpRenderer;
 
-// ─── Pen-up fix + HPGL export
-// ────────────────────────────────────────────────────────────
+static void rebuildPenUpRenderer() {
+  g_penUpRenderer.upload(mergedDoc());
+}
 
-static std::string g_fixStatus;  // shown in sidebar after fix/export
-static bool        g_hasFixed = false; // true when g_doc holds a fixed (unsaved) result
+static void refreshDocStats() {
+  g_stats = computeDocStats(mergedDoc());
+}
 
 // ─── Layout
 // ────────────────────────────────────────────────────────────────────
@@ -123,28 +137,52 @@ static void applyDefaultLayout(ImGuiID dockspace_id) {
 // ─── Actions
 // ─────────────────────────────────────────────────────────────────────
 
-static void loadFile(const std::string &path) {
-  g_filePath = path;
-  strncpy(g_filePathBuf, path.c_str(), sizeof(g_filePathBuf) - 1);
-  g_filePathBuf[sizeof(g_filePathBuf) - 1] = '\0';
-  g_doc = HpglParser{}.parseFile(path);
+static void toggleFullscreen(GLFWwindow *window) {
+  if (!g_isFullscreen) {
+    glfwGetWindowPos(window, &g_windowedX, &g_windowedY);
+    glfwGetWindowSize(window, &g_windowedW, &g_windowedH);
+    GLFWmonitor *monitor = glfwGetPrimaryMonitor();
+    const GLFWvidmode *mode = glfwGetVideoMode(monitor);
+    glfwSetWindowMonitor(window, monitor, 0, 0, mode->width, mode->height,
+                         mode->refreshRate);
+    g_isFullscreen = true;
+  } else {
+    glfwSetWindowMonitor(window, nullptr, g_windowedX, g_windowedY,
+                         g_windowedW, g_windowedH, 0);
+    g_isFullscreen = false;
+  }
+}
+
+// Load path as a new layer. If replace=true, clear existing layers first.
+static void loadFile(const std::string &path, bool replace = true) {
+  if (replace) {
+    g_layers.clear();
+    g_activeLayer = -1;
+  }
+  Layer layer;
+  layer.path = path;
+  layer.doc  = HpglParser{}.parseFile(path);
+  g_layers.push_back(std::move(layer));
+  g_activeLayer = static_cast<int>(g_layers.size()) - 1;
+  rebuildPenUpRenderer();
   refreshDocStats();
-  g_penUpRenderer.upload(g_doc);
   g_fitRequested = true;
-  g_hasFixed = false;
   g_fixStatus.clear();
 }
 
 static void applyFix() {
-  float cutoff = g_doc.minX + (g_fixLeftPct / 100.0f) * (g_doc.maxX - g_doc.minX);
-  g_doc = fixLongPenUps(g_doc,
+  if (g_activeLayer < 0 || g_activeLayer >= static_cast<int>(g_layers.size()))
+    return;
+  Layer &l = g_layers[g_activeLayer];
+  float cutoff = l.doc.minX + (g_fixLeftPct / 100.0f) * (l.doc.maxX - l.doc.minX);
+  l.doc = fixLongPenUps(l.doc,
                         g_penUpThreshold * kHpglUnitsPerCm,
                         g_fixStepCm      * kHpglUnitsPerCm,
                         cutoff);
+  l.hasFixed = true;
+  rebuildPenUpRenderer();
   refreshDocStats();
-  g_penUpRenderer.upload(g_doc);
   g_fitRequested = true;
-  g_hasFixed = true;
   g_fixStatus = "Fixed (not yet saved)";
 }
 
@@ -205,7 +243,7 @@ int main(int argc, char** argv) {
         g_rotation += static_cast<float>(M_PI_2);
         g_fitRequested = true;
       }
-      if (ImGui::IsKeyPressed(ImGuiKey_E) && !g_filePath.empty())
+      if (ImGui::IsKeyPressed(ImGuiKey_E) && g_activeLayer >= 0)
         applyFix();
       if (ImGui::IsKeyPressed(ImGuiKey_O)) {
         std::string path = openFileDialog();
@@ -215,12 +253,16 @@ int main(int argc, char** argv) {
 
     // ── Top status bar ───────────────────────────────────────────────────
     if (ImGui::BeginMainMenuBar()) {
-      if (g_filePath.empty()) {
+      if (g_layers.empty()) {
         ImGui::TextDisabled("No file loaded");
       } else {
-        std::string name = fs::path(g_filePath).filename().string();
-        if (g_hasFixed) name += "  [unsaved fix]";
-        ImGui::TextUnformatted(name.c_str());
+        for (int i = 0; i < static_cast<int>(g_layers.size()); ++i) {
+          if (i > 0) ImGui::TextDisabled("  |  ");
+          std::string name = fs::path(g_layers[i].path).filename().string();
+          if (g_layers[i].hasFixed) name += "*";
+          if (i == g_activeLayer) ImGui::TextUnformatted(name.c_str());
+          else                    ImGui::TextDisabled("%s", name.c_str());
+        }
       }
       ImGui::EndMainMenuBar();
     }
@@ -240,30 +282,78 @@ int main(int argc, char** argv) {
     ImGui::SetNextWindowSize({320, 600}, ImGuiCond_FirstUseEver);
     ImGui::Begin("Controls");
 
-    ImGui::SeparatorText("File");
+    // ── Layers ───────────────────────────────────────────────────────────
+    ImGui::SeparatorText("Layers");
     ImGui::InputText("##path", g_filePathBuf, sizeof(g_filePathBuf));
     ImGui::SameLine();
     if (ImGui::Button("Open"))
       loadFile(g_filePathBuf);
-    if (!g_filePath.empty()) {
-      ImGui::TextDisabled("%s", g_filePath.c_str());
-      ImGui::Text("Strokes: %zu", g_doc.strokes.size());
-      ImGui::Text("Bounds: (%.0f,%.0f)-(%.0f,%.0f)", g_doc.minX, g_doc.minY,
-                  g_doc.maxX, g_doc.maxY);
+    ImGui::SameLine();
+    if (ImGui::Button("Add"))
+      loadFile(g_filePathBuf, /*replace=*/false);
+
+    for (int i = 0; i < static_cast<int>(g_layers.size()); ++i) {
+      ImGui::PushID(i);
+      Layer &l = g_layers[i];
+      bool isActive = (i == g_activeLayer);
+
+      // Visibility checkbox — rebuild GPU data when toggled
+      bool wasVisible = l.visible;
+      ImGui::Checkbox("##vis", &l.visible);
+      if (l.visible != wasVisible) {
+        rebuildPenUpRenderer();
+        refreshDocStats();
+      }
+      ImGui::SameLine();
+
+      // Layer name — click to activate
+      std::string name = fs::path(l.path).filename().string();
+      if (l.hasFixed) name += " *";
+      if (isActive) {
+        ImGui::TextUnformatted(name.c_str());
+      } else {
+        if (ImGui::Selectable(name.c_str(), false,
+                              ImGuiSelectableFlags_None, {0, 0}))
+          g_activeLayer = i;
+      }
+      ImGui::SameLine();
+
+      // Remove button
+      if (ImGui::SmallButton("x")) {
+        g_layers.erase(g_layers.begin() + i);
+        if (g_activeLayer >= static_cast<int>(g_layers.size()))
+          g_activeLayer = static_cast<int>(g_layers.size()) - 1;
+        rebuildPenUpRenderer();
+        refreshDocStats();
+        g_fitRequested = true;
+        ImGui::PopID();
+        break; // iterator invalidated
+      }
+      ImGui::PopID();
+    }
+
+    // Active-layer details
+    if (g_activeLayer >= 0 && g_activeLayer < static_cast<int>(g_layers.size())) {
+      const HpglDoc &ad = g_layers[g_activeLayer].doc;
+      ImGui::Text("Strokes: %zu", ad.strokes.size());
+      ImGui::Text("Bounds: (%.0f,%.0f)-(%.0f,%.0f)",
+                  ad.minX, ad.minY, ad.maxX, ad.maxY);
     }
 
     ImGui::SeparatorText("Fix");
-    ImGui::BeginDisabled(g_filePath.empty());
+    ImGui::BeginDisabled(g_activeLayer < 0);
     if (ImGui::Button("Fix long pen-up jumps  [E]"))
       applyFix();
-    ImGui::BeginDisabled(!g_hasFixed);
+    bool activeHasFixed = g_activeLayer >= 0 &&
+                          g_layers[g_activeLayer].hasFixed;
+    ImGui::BeginDisabled(!activeHasFixed);
     ImGui::SameLine();
     if (ImGui::Button("Export")) {
-      std::string out = fixedPath(g_filePath);
-      if (exportHpgl(g_doc, out)) {
-        g_filePath = out;
-        strncpy(g_filePathBuf, out.c_str(), sizeof(g_filePathBuf) - 1);
-        g_hasFixed = false;
+      Layer &al = g_layers[g_activeLayer];
+      std::string out = fixedPath(al.path);
+      if (exportHpgl(al.doc, out)) {
+        al.path = out;
+        al.hasFixed = false;
         g_fixStatus = "Saved: " + out;
       } else {
         g_fixStatus = "Export failed: " + out;
@@ -342,7 +432,7 @@ int main(int argc, char** argv) {
     static ImVec2 lastCanvasSize = {0, 0};
     bool sizeChanged = (cW != lastCanvasSize.x || cH != lastCanvasSize.y);
     if (g_fitRequested || sizeChanged) {
-      auto vs = fitToCanvas(cW, cH, g_doc, g_rotation);
+      auto vs = fitToCanvas(cW, cH, mergedDoc(), g_rotation);
       g_scale = vs.scale; g_panX = vs.panX; g_panY = vs.panY;
     }
     g_fitRequested = false;
@@ -385,7 +475,7 @@ int main(int argc, char** argv) {
     DrawParams dp{g_panX, g_panY, g_scale, g_rotation,
                   g_showPenUp, g_penUpThreshold, g_fixLeftPct, g_pens,
                   g_showCoords};
-    drawHpgl(dl, canvasPos, cW, cH, g_doc, dp, g_penUpRenderer);
+    drawHpgl(dl, canvasPos, cW, cH, mergedDoc(), dp, g_penUpRenderer);
 
     // Stats overlay — top-right corner of canvas
     {
