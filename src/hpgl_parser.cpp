@@ -40,12 +40,14 @@ void HpglParser::updateBounds(float x, float y) {
 }
 
 void HpglParser::ensureStroke() {
-  if (!cur || cur->pen != currentPen) {
+  bool needNew = (curIdx < 0) ||
+                 (doc.strokes[curIdx].pen != currentPen);
+  if (needNew) {
     doc.strokes.push_back({});
-    cur = &doc.strokes.back();
-    cur->pen = currentPen;
+    curIdx = static_cast<int>(doc.strokes.size()) - 1;
+    doc.strokes[curIdx].pen = currentPen;
     if (penDown) {
-      cur->points.push_back({cx, cy});
+      doc.strokes[curIdx].points.push_back({cx, cy});
       updateBounds(cx, cy);
     }
   }
@@ -55,12 +57,12 @@ void HpglParser::handleSP(const std::string &params) {
   auto v = parseCoords(params);
   if (!v.empty())
     currentPen = static_cast<int>(v[0]);
-  cur = nullptr;
+  curIdx = -1;
 }
 
 void HpglParser::handlePU(const std::string &params) {
   penDown = false;
-  cur = nullptr;
+  curIdx = -1;
   auto v = parseCoords(params);
   for (size_t i = 0; i + 1 < v.size(); i += 2) {
     cx = v[i];
@@ -72,14 +74,15 @@ void HpglParser::handlePD(const std::string &params) {
   penDown = true;
   auto v = parseCoords(params);
   ensureStroke();
-  if (cur->points.empty()) {
-    cur->points.push_back({cx, cy});
+  auto &s = doc.strokes[curIdx];
+  if (s.points.empty()) {
+    s.points.push_back({cx, cy});
     updateBounds(cx, cy);
   }
   for (size_t i = 0; i + 1 < v.size(); i += 2) {
     cx = v[i];
     cy = v[i + 1];
-    cur->points.push_back({cx, cy});
+    doc.strokes[curIdx].points.push_back({cx, cy});
     updateBounds(cx, cy);
   }
 }
@@ -89,13 +92,14 @@ void HpglParser::handlePA(const std::string &params) {
   for (size_t i = 0; i + 1 < v.size(); i += 2) {
     if (penDown) {
       ensureStroke();
-      if (cur->points.empty()) {
-        cur->points.push_back({cx, cy});
+      auto &s = doc.strokes[curIdx];
+      if (s.points.empty()) {
+        s.points.push_back({cx, cy});
         updateBounds(cx, cy);
       }
       cx = v[i];
       cy = v[i + 1];
-      cur->points.push_back({cx, cy});
+      doc.strokes[curIdx].points.push_back({cx, cy});
       updateBounds(cx, cy);
     } else {
       cx = v[i];
@@ -112,7 +116,7 @@ HpglDoc HpglParser::parse(const std::string &content) {
   currentPen = 1;
   penDown    = false;
   cx = cy    = 0;
-  cur        = nullptr;
+  curIdx     = -1;
 
   size_t pos = 0;
   while (pos < content.size()) {

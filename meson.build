@@ -22,9 +22,14 @@ parser_lib = static_library('hpgl_parser',
   sources : ['src/hpgl_parser.cpp'],
   include_directories : include_directories('src'))
 
+fix_lib = static_library('hpgl_fix',
+  sources : ['src/hpgl_fix.cpp'],
+  link_with : parser_lib,
+  include_directories : include_directories('src'))
+
 executable('hpgl-viewer',
   sources : ['src/main.cpp'],
-  link_with : parser_lib,
+  link_with : [parser_lib, fix_lib],
   include_directories : include_directories('src'),
   dependencies : [glfw_dep, gl_dep, imgui_dep],
   install : true)
@@ -40,7 +45,7 @@ test('hpgl parser', test_exe)
 
 fix_test_exe = executable('test_hpgl_fix',
   sources : ['tests/test_hpgl_fix.cpp'],
-  link_with : parser_lib,
+  link_with : [parser_lib, fix_lib],
   include_directories : include_directories('src'))
 
 test('hpgl fix', fix_test_exe,

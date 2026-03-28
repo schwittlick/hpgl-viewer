@@ -9,6 +9,7 @@
 #include <cmath>
 
 #include "hpgl_parser.h"
+#include "hpgl_fix.h"
 
 // GL 3.x prototypes — GLFW_INCLUDE_GLEXT makes GLFW include <GL/glext.h>
 // after <GL/gl.h> so the GL base types are already defined.
@@ -129,31 +130,8 @@ static float g_fixLeftPct      =  15.0f; // % of doc width from left that is eli
 static int g_fbW = 0, g_fbH = 0;
 
 // Cached doc stats (recomputed on load)
-static int   g_numPaths    = 0;
-static float g_penDownDist = 0.0f; // mm
-static float g_penUpDist   = 0.0f; // mm
-static void computeDocStats() {
-  g_numPaths    = (int)g_doc.strokes.size();
-  g_penDownDist = 0.0f;
-  g_penUpDist   = 0.0f;
-  for (auto &s : g_doc.strokes) {
-    for (size_t i = 0; i + 1 < s.points.size(); ++i) {
-      float dx = s.points[i+1].x - s.points[i].x;
-      float dy = s.points[i+1].y - s.points[i].y;
-      g_penDownDist += sqrtf(dx*dx + dy*dy);
-    }
-  }
-  for (size_t i = 0; i + 1 < g_doc.strokes.size(); ++i) {
-    const auto &a = g_doc.strokes[i];
-    const auto &b = g_doc.strokes[i+1];
-    if (a.points.empty() || b.points.empty()) continue;
-    float dx = b.points.front().x - a.points.back().x;
-    float dy = b.points.front().y - a.points.back().y;
-    g_penUpDist += sqrtf(dx*dx + dy*dy);
-  }
-  g_penDownDist /= kHpglUnitsPerMm;
-  g_penUpDist   /= kHpglUnitsPerMm;
-}
+static DocStats g_stats;
+static void refreshDocStats() { g_stats = computeDocStats(g_doc); }
 
 // fullscreen state
 static bool g_isFullscreen = false;
@@ -291,6 +269,13 @@ struct PenUpRenderer {
       GLuint s = glCreateShader(type);
       glShaderSource(s, 1, &src, nullptr);
       glCompileShader(s);
+      GLint ok = 0;
+      glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
+      if (!ok) {
+        char log[512];
+        glGetShaderInfoLog(s, sizeof(log), nullptr, log);
+        fprintf(stderr, "Shader compile error: %s\n", log);
+      }
       return s;
     };
     GLuint vert = compile(GL_VERTEX_SHADER,   kPenUpVertSrc);
@@ -299,6 +284,15 @@ struct PenUpRenderer {
     glAttachShader(program, vert);
     glAttachShader(program, frag);
     glLinkProgram(program);
+    {
+      GLint ok = 0;
+      glGetProgramiv(program, GL_LINK_STATUS, &ok);
+      if (!ok) {
+        char log[512];
+        glGetProgramInfoLog(program, sizeof(log), nullptr, log);
+        fprintf(stderr, "Shader link error: %s\n", log);
+      }
+    }
     glDeleteShader(vert);
     glDeleteShader(frag);
 
@@ -476,7 +470,6 @@ static void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW,
 
 // ─── Pen-up fix + HPGL export
 // ────────────────────────────────────────────────────────────
-#include "hpgl_fix.h"
 
 // Derive output path: insert "_fixed" before the last extension.
 static std::string fixedPath(const std::string &src) {
@@ -540,7 +533,7 @@ int main(int argc, char** argv) {
       g_filePath = argv[1];
       strncpy(g_filePathBuf, g_filePath.c_str(), sizeof(g_filePathBuf) - 1);
       g_doc = HpglParser{}.parseFile(g_filePath);
-      computeDocStats();
+      refreshDocStats();
       g_penUpRenderer.upload(g_doc);
       g_fitRequested = true;
   }
@@ -569,7 +562,7 @@ int main(int argc, char** argv) {
       if (ImGui::IsKeyPressed(ImGuiKey_E) && !g_filePath.empty()) {
         g_doc = fixLongPenUps(g_doc, g_penUpThreshold * 400.0f, g_fixStepCm * 400.0f,
               g_doc.minX + (g_fixLeftPct / 100.0f) * (g_doc.maxX - g_doc.minX));
-        computeDocStats();
+        refreshDocStats();
         g_penUpRenderer.upload(g_doc);
         g_fitRequested = true;
         g_hasFixed = true;
@@ -581,7 +574,7 @@ int main(int argc, char** argv) {
           g_filePath = path;
           strncpy(g_filePathBuf, path.c_str(), sizeof(g_filePathBuf) - 1);
           g_doc = HpglParser{}.parseFile(g_filePath);
-          computeDocStats();
+          refreshDocStats();
           g_penUpRenderer.upload(g_doc);
           g_fitRequested = true;
           g_hasFixed = false;
@@ -623,7 +616,7 @@ int main(int argc, char** argv) {
     if (ImGui::Button("Open")) {
       g_filePath = g_filePathBuf;
       g_doc = HpglParser{}.parseFile(g_filePath);
-      computeDocStats();
+      refreshDocStats();
       g_penUpRenderer.upload(g_doc);
       g_fitRequested = true;
       g_hasFixed = false;
@@ -641,7 +634,7 @@ int main(int argc, char** argv) {
     if (ImGui::Button("Fix long pen-up jumps  [E]")) {
       g_doc = fixLongPenUps(g_doc, g_penUpThreshold * 400.0f, g_fixStepCm * 400.0f,
               g_doc.minX + (g_fixLeftPct / 100.0f) * (g_doc.maxX - g_doc.minX));
-      computeDocStats();
+      refreshDocStats();
       g_penUpRenderer.upload(g_doc);
       g_fitRequested = true;
       g_hasFixed = true;
@@ -766,9 +759,9 @@ int main(int argc, char** argv) {
     {
       char lines[4][48];
       snprintf(lines[0], sizeof(lines[0]), "%.0f FPS", io.Framerate);
-      snprintf(lines[1], sizeof(lines[1]), "%d paths", g_numPaths);
-      snprintf(lines[2], sizeof(lines[2]), "pd %.2f m", g_penDownDist / 1000.0f);
-      snprintf(lines[3], sizeof(lines[3]), "pu %.2f m", g_penUpDist   / 1000.0f);
+      snprintf(lines[1], sizeof(lines[1]), "%d paths", g_stats.numPaths);
+      snprintf(lines[2], sizeof(lines[2]), "pd %.2f m", g_stats.penDownMm / 1000.0f);
+      snprintf(lines[3], sizeof(lines[3]), "pu %.2f m", g_stats.penUpMm   / 1000.0f);
       float pad   = 6.0f;
       float lineH = ImGui::GetTextLineHeight();
       float step  = lineH + 2.0f;
@@ -788,11 +781,19 @@ int main(int argc, char** argv) {
       }
     }
 
-    // Tooltip with plotter coords
+    // Tooltip with plotter coords — invert the full xfPoint() transform:
+    // screen → unrotated canvas → HPGL
     if (hovered) {
-      ImVec2 mp = io.MousePos;
-      float px = (mp.x - canvasPos.x - g_panX) / g_scale;
-      float py = (mp.y - canvasPos.y - g_panY) / g_scale;
+      float mx = io.MousePos.x - canvasPos.x;
+      float my = io.MousePos.y - canvasPos.y;
+      // Undo rotation around canvas centre
+      float u = mx - cW * 0.5f;
+      float v = my - cH * 0.5f;
+      float rx =  u * cosR + v * sinR + cW * 0.5f;
+      float ry = -u * sinR + v * cosR + cH * 0.5f;
+      // Undo scale + pan
+      float px = (rx - g_panX) / g_scale;
+      float py = (ry - g_panY) / g_scale;
       ImGui::SetTooltip("%.0f, %.0f", px, py);
     }
 

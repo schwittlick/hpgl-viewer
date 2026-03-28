@@ -1,28 +1,11 @@
 #include "../src/hpgl_fix.h"
 #include "../src/hpgl_parser.h"
+#include "test_harness.h"
 
-#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <sstream>
 #include <string>
-
-// ── Minimal test harness ──────────────────────────────────────────────────────
-
-static int g_pass = 0, g_fail = 0;
-static const char *g_test = "";
-
-#define REQUIRE(expr)                                                           \
-  do {                                                                          \
-    if (expr) {                                                                 \
-      ++g_pass;                                                                 \
-    } else {                                                                    \
-      ++g_fail;                                                                 \
-      fprintf(stderr, "  FAIL  [%s]  line %d:  %s\n", g_test, __LINE__, #expr);\
-    }                                                                           \
-  } while (0)
-
-static void run(const char *name, void (*fn)()) { g_test = name; fn(); }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -161,6 +144,57 @@ static void test_fix_data_file_has_pen8_and_sp0() {
   remove(tmp.c_str());
 }
 
+// ── computeDocStats tests ─────────────────────────────────────────────────────
+
+static void test_stats_empty_doc() {
+  HpglDoc doc;
+  DocStats s = computeDocStats(doc);
+  REQUIRE(s.numPaths  == 0);
+  REQUIRE(s.penDownMm == 0.0f);
+  REQUIRE(s.penUpMm   == 0.0f);
+}
+
+static void test_stats_single_stroke_pen_down_dist() {
+  // One stroke: (0,0) → (400,0) — 400 HPGL units = 10 mm
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {400.f, 0.f}}, 1});
+  DocStats s = computeDocStats(doc);
+  REQUIRE(s.numPaths  == 1);
+  REQUIRE(s.penDownMm == 10.0f);
+  REQUIRE(s.penUpMm   == 0.0f);
+}
+
+static void test_stats_pen_up_gap_between_strokes() {
+  // Stroke 1 ends at (0,0); stroke 2 starts at (800,0) — gap = 800 units = 20 mm
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}}, 1});
+  doc.strokes.push_back(Stroke{{{800.f, 0.f}}, 1});
+  DocStats s = computeDocStats(doc);
+  REQUIRE(s.numPaths == 2);
+  REQUIRE(s.penUpMm  == 20.0f);
+}
+
+static void test_stats_multiple_strokes() {
+  // Two strokes each 400 units long; gap of 400 units between them
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {400.f, 0.f}}, 1});
+  doc.strokes.push_back(Stroke{{{800.f, 0.f}, {1200.f, 0.f}}, 1});
+  DocStats s = computeDocStats(doc);
+  REQUIRE(s.numPaths  == 2);
+  REQUIRE(s.penDownMm == 20.0f); // 10 mm + 10 mm
+  REQUIRE(s.penUpMm   == 10.0f); // gap = 400 units
+}
+
+static void test_stats_empty_strokes_ignored_in_pen_up() {
+  // An empty stroke between two real ones should not produce a pen-up distance
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}}, 1});
+  doc.strokes.push_back(Stroke{{}, 1});               // empty — no endpoints
+  doc.strokes.push_back(Stroke{{{400.f, 0.f}}, 1});
+  DocStats s = computeDocStats(doc);
+  REQUIRE(s.penUpMm == 0.0f); // empty stroke breaks the chain
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 int main(int argc, char **argv) {
@@ -172,6 +206,11 @@ int main(int argc, char **argv) {
   run("export ends with SP0",                 test_export_ends_with_sp0);
   run("export roundtrip preserves strokes",   test_export_roundtrip_preserves_strokes);
   run("fix data file has pen8 and SP0",       test_fix_data_file_has_pen8_and_sp0);
+  run("stats empty doc",                      test_stats_empty_doc);
+  run("stats single stroke pen-down dist",    test_stats_single_stroke_pen_down_dist);
+  run("stats pen-up gap between strokes",     test_stats_pen_up_gap_between_strokes);
+  run("stats multiple strokes",               test_stats_multiple_strokes);
+  run("stats empty strokes ignored in pen-up",test_stats_empty_strokes_ignored_in_pen_up);
 
   printf("\n%d/%d passed\n", g_pass, g_pass + g_fail);
   return g_fail > 0 ? 1 : 0;

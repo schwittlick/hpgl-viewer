@@ -46,5 +46,5 @@ private:
   int currentPen = 1;
   bool penDown    = false;
   float cx = 0, cy = 0;
-  Stroke *cur = nullptr;
+  int curIdx = -1; // index into doc.strokes, -1 = none
 };
