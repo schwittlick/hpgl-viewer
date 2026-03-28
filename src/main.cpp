@@ -481,7 +481,7 @@ int main(int argc, char** argv) {
 
     // Zoom toward cursor — convert mouse canvas position to pre-rotation space first
     if (hovered && io.MouseWheel != 0.0f) {
-      float factor = (io.MouseWheel > 0) ? 1.1f : 0.9f;
+      float factor = powf(1.1f, io.MouseWheel);
       float mx = io.MousePos.x - canvasPos.x;
       float my = io.MousePos.y - canvasPos.y;
       auto [px, py] = unrotateCanvas(mx, my, cW, cH, cosR, sinR);
