@@ -91,7 +91,7 @@ static bool writePng(const std::string &path, const std::vector<uint8_t> &pixels
 // ── Public API ────────────────────────────────────────────────────────────────
 
 bool exportPng(const HpglDoc &doc, const PenStyle pens[8],
-               const std::string &path, int widthPx) {
+               const std::string &path, float dpi) {
   if (doc.empty()) return false;
 
   float docW = doc.maxX - doc.minX;
@@ -99,10 +99,16 @@ bool exportPng(const HpglDoc &doc, const PenStyle pens[8],
   if (docW < 1) docW = 1;
   if (docH < 1) docH = 1;
 
-  // Compute output dimensions (maintain aspect ratio, 5 % margin).
+  // Physical size in inches → pixel dimensions at requested DPI, with 5% margin.
+  constexpr float kMmPerInch = 25.4f;
   constexpr float margin = 0.05f;
+  float docWMm = docW / kHpglUnitsPerMm;
+  float docHMm = docH / kHpglUnitsPerMm;
+  int   widthPx  = static_cast<int>(docWMm / kMmPerInch * dpi / (1.f - 2.f * margin));
+  int   heightPx = static_cast<int>(docHMm / kMmPerInch * dpi / (1.f - 2.f * margin));
+
+  // Scale: HPGL units → pixels
   float scale = static_cast<float>(widthPx) / docW * (1.f - 2.f * margin);
-  int   heightPx = static_cast<int>(docH * scale + 2.f * margin * widthPx);
 
   float panX = widthPx  * margin - doc.minX * scale;
   float panY = heightPx * margin - doc.minY * scale;

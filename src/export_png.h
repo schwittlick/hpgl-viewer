@@ -6,8 +6,8 @@
 #include <string>
 
 // Render doc to a PNG file at the given path.
-// widthPx sets the output width; height is derived from the doc aspect ratio.
+// Output dimensions are derived from the document's physical size at dpi.
 // pens[0..7] supplies the pen colours and thicknesses.
 // Returns true on success.
 bool exportPng(const HpglDoc &doc, const PenStyle pens[8],
-               const std::string &path, int widthPx = 2000);
+               const std::string &path, float dpi = 600.f);
