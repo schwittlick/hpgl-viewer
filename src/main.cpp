@@ -1,87 +1,27 @@
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
-#include <fstream>
-#include <string>
-#include <vector>
-#include <array>
 #include <filesystem>
-#include <cmath>
+#include <string>
 
-#include "hpgl_parser.h"
+#include "config.h"
 #include "hpgl_fix.h"
+#include "hpgl_parser.h"
+#include "renderer.h"
+#include "view_state.h"
 
-// GL 3.x prototypes — GLFW_INCLUDE_GLEXT makes GLFW include <GL/glext.h>
-// after <GL/gl.h> so the GL base types are already defined.
-#define GL_GLEXT_PROTOTYPES
-#define GLFW_INCLUDE_GLEXT
-
-#include "imgui.h"
 #include "imgui_internal.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
-#include <GLFW/glfw3.h>
-
-// ─── Config
-// ──────────────────────────────────────────────────────────────────
-
-namespace fs = std::filesystem;
-
-static fs::path configPath() {
-  const char *xdg = getenv("XDG_CONFIG_HOME");
-  fs::path base = xdg ? fs::path(xdg) : fs::path(getenv("HOME")) / ".config";
-  return base / "hpgl-viewer" / "config";
-}
-
-static std::string configLoad(const std::string &key) {
-  std::ifstream f(configPath());
-  std::string line;
-  while (std::getline(f, line)) {
-    if (line.rfind(key + "=", 0) == 0)
-      return line.substr(key.size() + 1);
-  }
-  return {};
-}
-
-static void configSave(const std::string &key, const std::string &value) {
-  fs::path path = configPath();
-  fs::create_directories(path.parent_path());
-
-  std::vector<std::string> lines;
-  std::ifstream in(path);
-  std::string line;
-  bool found = false;
-  while (std::getline(in, line)) {
-    if (line.rfind(key + "=", 0) == 0) {
-      lines.push_back(key + "=" + value);
-      found = true;
-    } else {
-      lines.push_back(line);
-    }
-  }
-  in.close();
-  if (!found)
-    lines.push_back(key + "=" + value);
-
-  std::ofstream out(path);
-  for (auto &l : lines)
-    out << l << "\n";
-}
 
 // ─── File dialog
 // ────────────────────────────────────────────────────────────
 
-static std::string g_lastOpenDir;
+namespace fs = std::filesystem;
 
-// Shell-escape a string for single-quoted insertion: replace ' with '\''
-static std::string shellEscapeSingleQuoted(const std::string &s) {
-  std::string out;
-  for (char c : s) {
-    if (c == '\'') out += "'\\''";
-    else           out += c;
-  }
-  return out;
-}
+static std::string g_lastOpenDir;
 
 static std::string openFileDialog() {
   std::string startDir = g_lastOpenDir;
@@ -112,11 +52,6 @@ static std::string openFileDialog() {
 // ─── App state
 // ────────────────────────────────────────────────────────────────
 
-struct PenStyle {
-  ImVec4 color = {0.1f, 0.1f, 0.1f, 1.0f};
-  float thickness = 0.3f; // mm
-};
-
 static HpglDoc g_doc;
 static std::string g_filePath;
 static char g_filePathBuf[4096] = ""; // PATH_MAX on Linux
@@ -145,41 +80,6 @@ static int g_windowedW = 1400, g_windowedH = 900;
 // pen styles (up to 8 pens)
 static PenStyle g_pens[8];
 
-static void initPenColors() {
-  ImVec4 defaults[] = {
-      {0.05f, 0.05f, 0.05f, 1}, // 1 black
-      {0.8f, 0.1f, 0.1f, 1},    // 2 red
-      {0.1f, 0.5f, 0.1f, 1},    // 3 green
-      {0.1f, 0.1f, 0.8f, 1},    // 4 blue
-      {0.7f, 0.5f, 0.0f, 1},    // 5 orange
-      {0.5f, 0.0f, 0.5f, 1},    // 6 purple
-      {0.0f, 0.5f, 0.5f, 1},    // 7 teal
-      {0.4f, 0.4f, 0.4f, 1},    // 8 grey
-  };
-  for (int i = 0; i < 8; ++i)
-    g_pens[i].color = defaults[i];
-}
-
-static void fitView(float canvasW, float canvasH) {
-  if (g_doc.empty())
-    return;
-  float docW = g_doc.maxX - g_doc.minX;
-  float docH = g_doc.maxY - g_doc.minY;
-  if (docW < 1) docW = 1;
-  if (docH < 1) docH = 1;
-
-  float absC = fabsf(cosf(g_rotation));
-  float absS = fabsf(sinf(g_rotation));
-  float effW = docW * absC + docH * absS;
-  float effH = docW * absS + docH * absC;
-
-  float pad = 0.05f;
-  g_scale = std::min(canvasW / effW, canvasH / effH) * (1.0f - 2.0f * pad);
-
-  g_panX = canvasW * 0.5f - (g_doc.minX + docW * 0.5f) * g_scale;
-  g_panY = canvasH * 0.5f - (g_doc.minY + docH * 0.5f) * g_scale;
-}
-
 static void toggleFullscreen(GLFWwindow *window) {
   if (!g_isFullscreen) {
     glfwGetWindowPos(window, &g_windowedX, &g_windowedY);
@@ -196,290 +96,7 @@ static void toggleFullscreen(GLFWwindow *window) {
   }
 }
 
-// ─── Pen-up GPU renderer
-// ─────────────────────────────────────────────────
-
-// Vertex shader: transforms HPGL coords to NDC using pan/zoom/rotation uniforms.
-// NDC conversion mirrors ImGui's own orthographic projection exactly:
-//   ndcX = (sx - DisplayPos.x) / DisplaySize.x * 2 - 1
-//   ndcY = 1 - (sy - DisplayPos.y) / DisplaySize.y * 2
-static const char *kPenUpVertSrc = R"glsl(
-#version 330 core
-layout(location = 0) in vec2  aPos;    // HPGL coordinates
-layout(location = 1) in float aLenSq;  // squared segment length (HPGL units²)
-layout(location = 2) in float aStartX; // HPGL X of segment start (same for both verts)
-
-uniform float uScale, uCosR, uSinR, uPanX, uPanY;
-uniform float uOriginX, uOriginY, uCanvasW, uCanvasH;
-uniform float uDispX, uDispY, uDispW, uDispH;  // ImGui DisplayPos / DisplaySize
-
-out float vLenSq;
-out float vStartX;
-
-void main() {
-    vLenSq  = aLenSq;
-    vStartX = aStartX;
-    // HPGL → rotated screen space (matches xfPoint() in CPU code)
-    float lx = aPos.x * uScale + uPanX - uCanvasW * 0.5;
-    float ly = aPos.y * uScale + uPanY - uCanvasH * 0.5;
-    float sx = uOriginX + lx * uCosR - ly * uSinR + uCanvasW * 0.5;
-    float sy = uOriginY + lx * uSinR + ly * uCosR + uCanvasH * 0.5;
-    // screen → NDC using ImGui's projection (DisplayPos / DisplaySize)
-    gl_Position = vec4(
-        (sx - uDispX) / uDispW * 2.0 - 1.0,
-        1.0 - (sy - uDispY) / uDispH * 2.0,
-        0.0, 1.0);
-}
-)glsl";
-
-static const char *kPenUpFragSrc = R"glsl(
-#version 330 core
-in float vLenSq;
-in float vStartX;
-uniform float uThresholdSq;
-uniform float uCutoffX;   // HPGL X cutoff (left-zone boundary)
-out vec4 fragColor;
-
-void main() {
-    bool isLong = vLenSq  > uThresholdSq;
-    bool inZone = vStartX <= uCutoffX;
-    if (isLong && inZone)
-        fragColor = vec4(220.0/255.0,  50.0/255.0,  50.0/255.0, 200.0/255.0); // red: will fix
-    else if (isLong)
-        fragColor = vec4(220.0/255.0, 150.0/255.0,  50.0/255.0, 180.0/255.0); // orange: long, skipped
-    else
-        fragColor = vec4( 60.0/255.0, 220.0/255.0, 100.0/255.0, 160.0/255.0); // green: short
-}
-)glsl";
-
-struct PenUpRenderer {
-  GLuint vao = 0, vbo = 0, program = 0;
-  int    vertexCount = 0;
-  bool   valid = false;
-
-  // Per-frame context — filled before issuing the draw callback
-  ImVec2 origin{};
-  float  cW = 0, cH = 0;
-  float  thresholdSq = 0;
-  float  cutoffX = 0;
-  float  dispX = 0, dispY = 0, dispW = 1, dispH = 1; // ImGui DisplayPos/Size
-
-  GLint uScale=-1, uCosR=-1, uSinR=-1, uPanX=-1, uPanY=-1;
-  GLint uOriginX=-1, uOriginY=-1, uCanvasW=-1, uCanvasH=-1;
-  GLint uDispX=-1, uDispY=-1, uDispW=-1, uDispH=-1, uThresholdSq=-1, uCutoffX=-1;
-
-  void init() {
-    auto compile = [](GLenum type, const char *src) -> GLuint {
-      GLuint s = glCreateShader(type);
-      glShaderSource(s, 1, &src, nullptr);
-      glCompileShader(s);
-      GLint ok = 0;
-      glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
-      if (!ok) {
-        char log[512];
-        glGetShaderInfoLog(s, sizeof(log), nullptr, log);
-        fprintf(stderr, "Shader compile error: %s\n", log);
-      }
-      return s;
-    };
-    GLuint vert = compile(GL_VERTEX_SHADER,   kPenUpVertSrc);
-    GLuint frag = compile(GL_FRAGMENT_SHADER, kPenUpFragSrc);
-    program = glCreateProgram();
-    glAttachShader(program, vert);
-    glAttachShader(program, frag);
-    glLinkProgram(program);
-    {
-      GLint ok = 0;
-      glGetProgramiv(program, GL_LINK_STATUS, &ok);
-      if (!ok) {
-        char log[512];
-        glGetProgramInfoLog(program, sizeof(log), nullptr, log);
-        fprintf(stderr, "Shader link error: %s\n", log);
-      }
-    }
-    glDeleteShader(vert);
-    glDeleteShader(frag);
-
-    uScale       = glGetUniformLocation(program, "uScale");
-    uCosR        = glGetUniformLocation(program, "uCosR");
-    uSinR        = glGetUniformLocation(program, "uSinR");
-    uPanX        = glGetUniformLocation(program, "uPanX");
-    uPanY        = glGetUniformLocation(program, "uPanY");
-    uOriginX     = glGetUniformLocation(program, "uOriginX");
-    uOriginY     = glGetUniformLocation(program, "uOriginY");
-    uCanvasW     = glGetUniformLocation(program, "uCanvasW");
-    uCanvasH     = glGetUniformLocation(program, "uCanvasH");
-    uDispX       = glGetUniformLocation(program, "uDispX");
-    uDispY       = glGetUniformLocation(program, "uDispY");
-    uDispW       = glGetUniformLocation(program, "uDispW");
-    uDispH       = glGetUniformLocation(program, "uDispH");
-    uThresholdSq = glGetUniformLocation(program, "uThresholdSq");
-    uCutoffX     = glGetUniformLocation(program, "uCutoffX");
-
-    glGenVertexArrays(1, &vao);
-    glGenBuffers(1, &vbo);
-    valid = true;
-  }
-
-  // Call once after a new file is loaded.
-  void upload(const HpglDoc &doc) {
-    if (!valid) return;
-    // 4 floats per vertex: x, y, lenSq, startX — 2 vertices per pen-up segment
-    std::vector<float> data;
-    data.reserve(doc.strokes.size() * 8);
-    for (size_t i = 0; i + 1 < doc.strokes.size(); ++i) {
-      const auto &a = doc.strokes[i];
-      const auto &b = doc.strokes[i + 1];
-      if (a.points.empty() || b.points.empty()) continue;
-      float x0 = a.points.back().x,  y0 = a.points.back().y;
-      float x1 = b.points.front().x, y1 = b.points.front().y;
-      float dx = x1 - x0, dy = y1 - y0;
-      float lenSq = dx*dx + dy*dy;
-      // startX is identical for both vertices of the segment
-      data.insert(data.end(), {x0, y0, lenSq, x0,
-                                x1, y1, lenSq, x0});
-    }
-    vertexCount = (int)(data.size() / 4);
-
-    glBindVertexArray(vao);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER,
-                 (GLsizeiptr)(data.size() * sizeof(float)),
-                 data.data(), GL_STATIC_DRAW);
-    constexpr int stride = 4 * sizeof(float);
-    // attrib 0: vec2 position
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, stride, (void*)0);
-    glEnableVertexAttribArray(0);
-    // attrib 1: float lenSq
-    glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, stride, (void*)(2 * sizeof(float)));
-    glEnableVertexAttribArray(1);
-    // attrib 2: float startX
-    glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, stride, (void*)(3 * sizeof(float)));
-    glEnableVertexAttribArray(2);
-    glBindVertexArray(0);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-  }
-
-  void draw() const {
-    if (!valid || vertexCount == 0) return;
-    glUseProgram(program);
-    glUniform1f(uScale,       g_scale);
-    glUniform1f(uCosR,        cosf(g_rotation));
-    glUniform1f(uSinR,        sinf(g_rotation));
-    glUniform1f(uPanX,        g_panX);
-    glUniform1f(uPanY,        g_panY);
-    glUniform1f(uOriginX,     origin.x);
-    glUniform1f(uOriginY,     origin.y);
-    glUniform1f(uCanvasW,     cW);
-    glUniform1f(uCanvasH,     cH);
-    glUniform1f(uDispX,       dispX);
-    glUniform1f(uDispY,       dispY);
-    glUniform1f(uDispW,       dispW);
-    glUniform1f(uDispH,       dispH);
-    glUniform1f(uThresholdSq, thresholdSq);
-    glUniform1f(uCutoffX,     cutoffX);
-    glBindVertexArray(vao);
-    glDrawArrays(GL_LINES, 0, vertexCount);
-    glBindVertexArray(0);
-  }
-};
-
 static PenUpRenderer g_penUpRenderer;
-
-static void penUpRenderCallback(const ImDrawList*, const ImDrawCmd *cmd) {
-  auto *r = static_cast<PenUpRenderer*>(cmd->UserCallbackData);
-
-  // Convert ImGui clip rect to GL scissor (framebuffer coords, y-flipped).
-  ImDrawData *dd = ImGui::GetDrawData();
-  float scaleX = dd->FramebufferScale.x, scaleY = dd->FramebufferScale.y;
-  float ox = dd->DisplayPos.x,           oy     = dd->DisplayPos.y;
-  int x1 = (int)((cmd->ClipRect.x - ox) * scaleX);
-  int y1 = (int)((cmd->ClipRect.y - oy) * scaleY);
-  int x2 = (int)((cmd->ClipRect.z - ox) * scaleX);
-  int y2 = (int)((cmd->ClipRect.w - oy) * scaleY);
-  glScissor(x1, g_fbH - y2, x2 - x1, y2 - y1);
-
-  r->draw();
-}
-
-// ─── Drawing
-// ──────────────────────────────────────────────────────────────────
-
-// Undo canvas rotation around its centre: screen-relative coords → pre-rotation coords.
-static ImVec2 unrotateCanvas(float mx, float my, float cW, float cH,
-                              float cosR, float sinR) {
-  float u = mx - cW * 0.5f;
-  float v = my - cH * 0.5f;
-  return {u * cosR + v * sinR + cW * 0.5f,
-         -u * sinR + v * cosR + cH * 0.5f};
-}
-
-static ImVec2 xfPoint(float hx, float hy, ImVec2 origin, float cW, float cH,
-                      float cosR, float sinR) {
-  float sx = hx * g_scale + g_panX - cW * 0.5f;
-  float sy = hy * g_scale + g_panY - cH * 0.5f;
-  return {origin.x + sx * cosR - sy * sinR + cW * 0.5f,
-          origin.y + sx * sinR + sy * cosR + cH * 0.5f};
-}
-
-static void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW,
-                     float canvasH) {
-  dl->PushClipRect(origin, {origin.x + canvasW, origin.y + canvasH}, true);
-
-  float cosR = cosf(g_rotation);
-  float sinR = sinf(g_rotation);
-
-  // Pen-down strokes (CPU path — typically far fewer total segments)
-  for (auto &stroke : g_doc.strokes) {
-    if (stroke.points.empty())
-      continue;
-    int pi = std::max(0, std::min(stroke.pen - 1, 7));
-    ImU32 col = ImGui::ColorConvertFloat4ToU32(g_pens[pi].color);
-    float screen_thick =
-        std::max(1.0f, g_pens[pi].thickness * kHpglUnitsPerMm * g_scale);
-
-    if (stroke.points.size() == 2 && stroke.points[0] == stroke.points[1]) {
-      ImVec2 p = xfPoint(stroke.points[0].x, stroke.points[0].y, origin,
-                         canvasW, canvasH, cosR, sinR);
-      dl->AddCircleFilled(p, screen_thick * 0.5f, col);
-      continue;
-    }
-
-    for (size_t i = 0; i + 1 < stroke.points.size(); ++i) {
-      ImVec2 p0 = xfPoint(stroke.points[i].x, stroke.points[i].y, origin,
-                          canvasW, canvasH, cosR, sinR);
-      ImVec2 p1 = xfPoint(stroke.points[i + 1].x, stroke.points[i + 1].y,
-                          origin, canvasW, canvasH, cosR, sinR);
-      dl->AddLine(p0, p1, col, screen_thick);
-    }
-  }
-
-  // Pen-up moves — drawn via GPU VBO (one draw call for all segments)
-  if (g_showPenUp && g_penUpRenderer.valid && g_penUpRenderer.vertexCount > 0) {
-    float t = g_penUpThreshold * kHpglUnitsPerCm;
-    float cx = g_doc.minX + (g_fixLeftPct / 100.0f) * (g_doc.maxX - g_doc.minX);
-    ImVec2 dp = ImGui::GetMainViewport()->Pos;
-    ImVec2 ds = ImGui::GetIO().DisplaySize;
-    g_penUpRenderer.origin      = origin;
-    g_penUpRenderer.cW          = canvasW;
-    g_penUpRenderer.cH          = canvasH;
-    g_penUpRenderer.thresholdSq = t * t;
-    g_penUpRenderer.cutoffX     = cx;
-    g_penUpRenderer.dispX       = dp.x;
-    g_penUpRenderer.dispY       = dp.y;
-    g_penUpRenderer.dispW       = ds.x;
-    g_penUpRenderer.dispH       = ds.y;
-    dl->AddCallback(penUpRenderCallback, &g_penUpRenderer);
-    dl->AddCallback(ImDrawCallback_ResetRenderState, nullptr);
-
-    // Draw vertical cutoff line in HPGL space
-    ImVec2 lineTop = xfPoint(cx, g_doc.minY, origin, canvasW, canvasH, cosR, sinR);
-    ImVec2 lineBot = xfPoint(cx, g_doc.maxY, origin, canvasW, canvasH, cosR, sinR);
-    dl->AddLine(lineTop, lineBot, IM_COL32(100, 200, 255, 200), 1.5f);
-  }
-
-  dl->PopClipRect();
-}
 
 // ─── Pen-up fix + HPGL export
 // ────────────────────────────────────────────────────────────
@@ -560,7 +177,7 @@ int main(int argc, char** argv) {
 
   g_penUpRenderer.init();
 
-  initPenColors();
+  initPenColors(g_pens);
   g_lastOpenDir = configLoad("last_open_dir");
 
   if (argc > 1)
@@ -710,8 +327,10 @@ int main(int argc, char** argv) {
 
     static ImVec2 lastCanvasSize = {0, 0};
     bool sizeChanged = (cW != lastCanvasSize.x || cH != lastCanvasSize.y);
-    if (g_fitRequested || sizeChanged)
-      fitView(cW, cH);
+    if (g_fitRequested || sizeChanged) {
+      auto vs = fitToCanvas(cW, cH, g_doc, g_rotation);
+      g_scale = vs.scale; g_panX = vs.panX; g_panY = vs.panY;
+    }
     g_fitRequested = false;
     lastCanvasSize = {cW, cH};
 
@@ -748,7 +367,10 @@ int main(int argc, char** argv) {
       g_scale *= factor;
     }
 
-    drawHpgl(dl, canvasPos, cW, cH);
+    g_penUpRenderer.fbH = g_fbH;
+    DrawParams dp{g_panX, g_panY, g_scale, g_rotation,
+                  g_showPenUp, g_penUpThreshold, g_fixLeftPct, g_pens};
+    drawHpgl(dl, canvasPos, cW, cH, g_doc, dp, g_penUpRenderer);
 
     // Stats overlay — top-right corner of canvas
     {
