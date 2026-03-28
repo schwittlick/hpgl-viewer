@@ -68,7 +68,7 @@ static bool g_fitRequested = false;
 static float g_panX = 0, g_panY = 0, g_scale = 1.0f;
 static float g_rotation = 0.0f;
 static bool  g_showPenUp = false;
-static bool  g_showCoords = false;
+static bool  g_showCoords = true;
 static float g_penUpThreshold =  10.0f; // cm
 static float g_fixStepCm      =   2.0f; // cm between inserted waypoints
 static float g_fixLeftPct      =  15.0f; // % of doc width from left that is eligible

@@ -256,9 +256,9 @@ static void drawCoordinateSystem(ImDrawList *dl, ImVec2 origin,
   float stepX = pickGridStep(visW);
   float stepY = pickGridStep(visH);
 
-  ImU32 gridCol  = IM_COL32( 80, 120, 200,  35);
-  ImU32 axisCol  = IM_COL32( 80, 120, 200,  90);
-  ImU32 labelCol = IM_COL32( 60,  90, 170, 200);
+  ImU32 gridCol  = IM_COL32( 80, 120, 200,  70);
+  ImU32 axisCol  = IM_COL32( 80, 120, 200, 160);
+  ImU32 labelCol = IM_COL32( 60,  90, 170, 220);
 
   auto snap = [](float v, float step) { return floorf(v / step) * step; };
 
