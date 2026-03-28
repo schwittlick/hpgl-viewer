@@ -292,6 +292,10 @@ int main(int argc, char** argv) {
     }
 
     ImGui::SeparatorText("Pen Styles");
+    static const float kPenWidths[]      = {0.3f, 0.4f, 0.5f, 0.6f, 0.8f, 1.0f};
+    static const char *kPenWidthLabels[] = {"0.3 mm", "0.4 mm", "0.5 mm",
+                                            "0.6 mm", "0.8 mm", "1.0 mm"};
+    constexpr int kNumWidths = 6;
     for (int i = 0; i < 8; ++i) {
       ImGui::PushID(i);
       char label[16];
@@ -300,9 +304,17 @@ int main(int argc, char** argv) {
                         ImGuiColorEditFlags_NoInputs |
                             ImGuiColorEditFlags_AlphaBar);
       ImGui::SameLine();
-      ImGui::SetNextItemWidth(100);
-      ImGui::SliderFloat("##thick", &g_pens[i].thickness, 0.05f, 2.0f,
-                         "%.2f mm");
+      // Find which standard width matches the current thickness (if any).
+      int sel = -1;
+      for (int j = 0; j < kNumWidths; ++j)
+        if (fabsf(g_pens[i].thickness - kPenWidths[j]) < 0.01f) { sel = j; break; }
+      ImGui::SetNextItemWidth(90);
+      if (ImGui::BeginCombo("##thick", sel >= 0 ? kPenWidthLabels[sel] : "custom")) {
+        for (int j = 0; j < kNumWidths; ++j)
+          if (ImGui::Selectable(kPenWidthLabels[j], sel == j))
+            g_pens[i].thickness = kPenWidths[j];
+        ImGui::EndCombo();
+      }
       ImGui::PopID();
     }
 
