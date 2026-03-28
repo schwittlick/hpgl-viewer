@@ -16,7 +16,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y meson ninja-build libglfw3-dev libgl-dev
+          sudo apt-get install -y meson ninja-build libglfw3-dev libgl-dev libpng-dev
 
       - name: Configure
         run: meson setup builddir --buildtype=debug
