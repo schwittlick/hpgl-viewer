@@ -227,6 +227,94 @@ void penUpRenderCallback(const ImDrawList*, const ImDrawCmd *cmd) {
   r->draw();
 }
 
+// ── Coordinate system overlay ────────────────────────────────────────────────
+
+// Choose a grid step (in HPGL units) that yields 5–20 visible grid lines.
+static float pickGridStep(float hpglSpan) {
+  // steps in HPGL units: 1 mm, 5 mm, 1 cm, 2 cm, 5 cm, 10 cm, 20 cm, 50 cm
+  static const float kSteps[] = {40, 200, 400, 800, 2000, 4000, 8000, 20000};
+  for (float s : kSteps)
+    if (hpglSpan / s < 20.f) return s;
+  return kSteps[std::size(kSteps) - 1];
+}
+
+static void drawCoordinateSystem(ImDrawList *dl, ImVec2 origin,
+                                  float cW, float cH,
+                                  const HpglDoc &doc, const DrawParams &p) {
+  const float cosR = cosf(p.rotation);
+  const float sinR = sinf(p.rotation);
+
+  // HPGL viewport (what's currently visible, with a small margin)
+  float invScale = 1.f / p.scale;
+  float visW = cW * invScale;
+  float visH = cH * invScale;
+  float hMinX = (-p.panX) * invScale;
+  float hMinY = (-p.panY) * invScale;
+  float hMaxX = hMinX + visW;
+  float hMaxY = hMinY + visH;
+
+  float stepX = pickGridStep(visW);
+  float stepY = pickGridStep(visH);
+
+  ImU32 gridCol  = IM_COL32( 80, 120, 200,  35);
+  ImU32 axisCol  = IM_COL32( 80, 120, 200,  90);
+  ImU32 labelCol = IM_COL32( 60,  90, 170, 200);
+
+  auto snap = [](float v, float step) { return floorf(v / step) * step; };
+
+  // Vertical grid lines (constant HPGL-X)
+  for (float x = snap(hMinX, stepX); x <= hMaxX; x += stepX) {
+    ImVec2 a = xfPoint(x, hMinY, origin, p.panX, p.panY, p.scale,
+                       cW, cH, cosR, sinR);
+    ImVec2 b = xfPoint(x, hMaxY, origin, p.panX, p.panY, p.scale,
+                       cW, cH, cosR, sinR);
+    ImU32 col = (fabsf(x) < 0.5f) ? axisCol : gridCol;
+    dl->AddLine(a, b, col, 1.f);
+
+    // Label: show value in mm or cm
+    char buf[24];
+    float mm = x / kHpglUnitsPerMm;
+    if (fabsf(mm) < 0.01f) snprintf(buf, sizeof(buf), "0");
+    else if (fabsf(mm) >= 10.f) snprintf(buf, sizeof(buf), "%.0fcm", mm / 10.f);
+    else snprintf(buf, sizeof(buf), "%.0fmm", mm);
+    // Place label near the bottom of the canvas (unrotated: just above bottom edge)
+    ImVec2 lp = xfPoint(x, hMinY + visH * 0.97f, origin, p.panX, p.panY,
+                        p.scale, cW, cH, cosR, sinR);
+    dl->AddText(lp, labelCol, buf);
+  }
+
+  // Horizontal grid lines (constant HPGL-Y)
+  for (float y = snap(hMinY, stepY); y <= hMaxY; y += stepY) {
+    ImVec2 a = xfPoint(hMinX, y, origin, p.panX, p.panY, p.scale,
+                       cW, cH, cosR, sinR);
+    ImVec2 b = xfPoint(hMaxX, y, origin, p.panX, p.panY, p.scale,
+                       cW, cH, cosR, sinR);
+    ImU32 col = (fabsf(y) < 0.5f) ? axisCol : gridCol;
+    dl->AddLine(a, b, col, 1.f);
+
+    char buf[24];
+    float mm = y / kHpglUnitsPerMm;
+    if (fabsf(mm) < 0.01f) snprintf(buf, sizeof(buf), "0");
+    else if (fabsf(mm) >= 10.f) snprintf(buf, sizeof(buf), "%.0fcm", mm / 10.f);
+    else snprintf(buf, sizeof(buf), "%.0fmm", mm);
+    ImVec2 lp = xfPoint(hMinX + visW * 0.01f, y, origin, p.panX, p.panY,
+                        p.scale, cW, cH, cosR, sinR);
+    dl->AddText(lp, labelCol, buf);
+  }
+
+  // Document bounding-box outline
+  if (!doc.empty()) {
+    ImVec2 corners[4] = {
+      xfPoint(doc.minX, doc.minY, origin, p.panX, p.panY, p.scale, cW, cH, cosR, sinR),
+      xfPoint(doc.maxX, doc.minY, origin, p.panX, p.panY, p.scale, cW, cH, cosR, sinR),
+      xfPoint(doc.maxX, doc.maxY, origin, p.panX, p.panY, p.scale, cW, cH, cosR, sinR),
+      xfPoint(doc.minX, doc.maxY, origin, p.panX, p.panY, p.scale, cW, cH, cosR, sinR),
+    };
+    ImU32 boxCol = IM_COL32(80, 120, 200, 120);
+    dl->AddPolyline(corners, 4, boxCol, ImDrawFlags_Closed, 1.f);
+  }
+}
+
 // ── Scene drawing ─────────────────────────────────────────────────────────────
 
 void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW, float canvasH,
@@ -235,6 +323,9 @@ void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW, float canvasH,
 
   float cosR = cosf(p.rotation);
   float sinR = sinf(p.rotation);
+
+  if (p.showCoords)
+    drawCoordinateSystem(dl, origin, canvasW, canvasH, doc, p);
 
   // Pen-down strokes (CPU path)
   for (const auto &stroke : doc.strokes) {

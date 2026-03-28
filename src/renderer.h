@@ -72,6 +72,7 @@ struct DrawParams {
   float penUpThreshold; // cm
   float fixLeftPct;     // percent [0..100]
   const PenStyle *pens; // pointer to array of 8
+  bool  showCoords = false;
 };
 
 void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW, float canvasH,

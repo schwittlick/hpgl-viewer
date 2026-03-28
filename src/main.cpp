@@ -61,6 +61,7 @@ static bool g_fitRequested = false;
 static float g_panX = 0, g_panY = 0, g_scale = 1.0f;
 static float g_rotation = 0.0f;
 static bool  g_showPenUp = false;
+static bool  g_showCoords = false;
 static float g_penUpThreshold =  10.0f; // cm
 static float g_fixStepCm      =   2.0f; // cm between inserted waypoints
 static float g_fixLeftPct      =  15.0f; // % of doc width from left that is eligible
@@ -281,6 +282,7 @@ int main(int argc, char** argv) {
 
     ImGui::SeparatorText("View");
     ImGui::Checkbox("Show pen-up moves", &g_showPenUp);
+    ImGui::Checkbox("Show coordinate grid", &g_showCoords);
     ImGui::Text("Scale: %.3f", g_scale);
     ImGui::SameLine();
     if (ImGui::Button("Fit"))
@@ -381,7 +383,8 @@ int main(int argc, char** argv) {
 
     g_penUpRenderer.fbH = g_fbH;
     DrawParams dp{g_panX, g_panY, g_scale, g_rotation,
-                  g_showPenUp, g_penUpThreshold, g_fixLeftPct, g_pens};
+                  g_showPenUp, g_penUpThreshold, g_fixLeftPct, g_pens,
+                  g_showCoords};
     drawHpgl(dl, canvasPos, cW, cH, g_doc, dp, g_penUpRenderer);
 
     // Stats overlay — top-right corner of canvas
