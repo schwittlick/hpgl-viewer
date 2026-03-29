@@ -327,9 +327,27 @@ void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW, float canvasH,
   if (p.showCoords)
     drawCoordinateSystem(dl, origin, canvasW, canvasH, doc, p);
 
+  // Compute visible HPGL AABB by inverse-transforming the 4 canvas corners.
+  // This gives a conservative bounding box used to cull off-screen strokes.
+  float visMinX =  1e30f, visMinY =  1e30f;
+  float visMaxX = -1e30f, visMaxY = -1e30f;
+  for (int ci = 0; ci < 4; ++ci) {
+    float cx = (ci & 1) ? canvasW : 0.f;
+    float cy = (ci & 2) ? canvasH : 0.f;
+    float lx = (cx - canvasW * 0.5f) * cosR + (cy - canvasH * 0.5f) * sinR;
+    float ly = -(cx - canvasW * 0.5f) * sinR + (cy - canvasH * 0.5f) * cosR;
+    float hx = (lx - p.panX + canvasW * 0.5f) / p.scale;
+    float hy = (ly - p.panY + canvasH * 0.5f) / p.scale;
+    visMinX = std::min(visMinX, hx); visMinY = std::min(visMinY, hy);
+    visMaxX = std::max(visMaxX, hx); visMaxY = std::max(visMaxY, hy);
+  }
+
   // Pen-down strokes (CPU path)
   for (const auto &stroke : doc.strokes) {
     if (stroke.points.empty()) continue;
+    // Cull strokes entirely outside the visible HPGL area
+    if (stroke.bboxMax.x < visMinX || stroke.bboxMin.x > visMaxX ||
+        stroke.bboxMax.y < visMinY || stroke.bboxMin.y > visMaxY) continue;
     int pi = std::max(0, std::min(stroke.pen - 1, 7));
     ImU32 col = ImGui::ColorConvertFloat4ToU32(p.pens[pi].color);
     float screen_thick =

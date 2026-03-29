@@ -14,3 +14,10 @@ done:
 
 done:
 - [x] scaling with mouse wheel gets slower the closer i get — zoom factor now proportional to scroll amount via powf(1.1, delta), so fast scrolling zooms faster and trackpads feel smooth
+
+
+done:
+- [x] viewport culling: per-stroke bounding boxes computed at parse time; drawHpgl skips strokes entirely outside the visible HPGL area — O(1) cull per stroke instead of submitting every segment to ImGui
+
+todo:
+-

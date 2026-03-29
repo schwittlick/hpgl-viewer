@@ -13,19 +13,30 @@ A lightweight HPGL file viewer built with Dear ImGui + OpenGL3 + GLFW.
 
 ## Features
 
-- Open `.hpgl` / `.plt` files via path input
-- Fit-to-window button
-- Pan (left-drag or middle-drag)
-- Zoom to cursor (scroll wheel)
+- Open `.hpgl` / `.plt` files via path input, drag-and-drop, or `O` key
+- Add multiple files as layers (`A` key or drag-and-drop additional files)
+- Pan (left-drag or middle-drag), zoom to cursor (scroll wheel), rotate 90° (`R`)
+- Fit-to-window (`C`), fullscreen (`F`)
 - Per-pen color (color picker) and line thickness (slider)
 - Plotter coordinate tooltip on hover
+- Pen-up move visualisation: green = short, orange = long but outside zone, red = will be fixed
+- Pen-up smear fix: inserts pen-8 waypoint dots along long pen-up moves, exported as a separate `_fixed.hpgl` file
+  - **Threshold** slider: minimum move length to flag/fix (cm)
+  - **Waypoint spacing** slider: distance between inserted dots (cm)
+  - **Left zone** slider: only fix moves that start within the leftmost X% of the document
+- PNG export at physical DPI
 
 ## Keyboard shortcuts
 
-- o: open file
-- f: fullscreen
-- q: quit
-- c: fit to window
+| Key | Action |
+|-----|--------|
+| `O` | Open file (replaces current) |
+| `A` | Add file as additional layer |
+| `F` | Toggle fullscreen |
+| `Q` | Quit |
+| `C` | Fit to window |
+| `R` | Rotate 90° |
+| `E` | Apply pen-up fix (preview in viewport, use Export to save) |
 
 ## Build
 

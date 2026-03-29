@@ -15,6 +15,9 @@ struct Vec2 {
 struct Stroke {
   std::vector<Vec2> points;
   int pen = 1;
+  // Per-stroke AABB in HPGL units, populated by HpglParser.
+  Vec2 bboxMin{ 1e30f,  1e30f};
+  Vec2 bboxMax{-1e30f, -1e30f};
 };
 
 struct HpglDoc {
@@ -40,6 +43,7 @@ private:
 
   void ensureStroke();
   void updateBounds(float x, float y);
+  void addPoint(float x, float y); // push point + update stroke and doc bounds
   std::vector<float> parseCoords(const std::string &params);
 
   HpglDoc doc;

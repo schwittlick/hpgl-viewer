@@ -39,6 +39,14 @@ void HpglParser::updateBounds(float x, float y) {
   doc.maxY = std::max(doc.maxY, y);
 }
 
+void HpglParser::addPoint(float x, float y) {
+  Stroke &s = doc.strokes[curIdx];
+  s.points.push_back({x, y});
+  s.bboxMin.x = std::min(s.bboxMin.x, x); s.bboxMin.y = std::min(s.bboxMin.y, y);
+  s.bboxMax.x = std::max(s.bboxMax.x, x); s.bboxMax.y = std::max(s.bboxMax.y, y);
+  updateBounds(x, y);
+}
+
 void HpglParser::ensureStroke() {
   bool needNew = (curIdx < 0) ||
                  (doc.strokes[curIdx].pen != currentPen);
@@ -46,10 +54,8 @@ void HpglParser::ensureStroke() {
     doc.strokes.push_back({});
     curIdx = static_cast<int>(doc.strokes.size()) - 1;
     doc.strokes[curIdx].pen = currentPen;
-    if (penDown) {
-      doc.strokes[curIdx].points.push_back({cx, cy});
-      updateBounds(cx, cy);
-    }
+    if (penDown)
+      addPoint(cx, cy);
   }
 }
 
@@ -80,23 +86,18 @@ void HpglParser::handlePD(const std::string &params) {
   for (size_t i = 0; i + 1 < v.size(); i += 2) {
     cx = v[i];
     cy = v[i + 1];
-    doc.strokes[curIdx].points.push_back({cx, cy});
-    updateBounds(cx, cy);
+    addPoint(cx, cy);
   }
 }
 
 void HpglParser::handlePA(const std::string &params) {
   auto v = parseCoords(params);
   for (size_t i = 0; i + 1 < v.size(); i += 2) {
+    cx = v[i];
+    cy = v[i + 1];
     if (penDown) {
       ensureStroke();
-      cx = v[i];
-      cy = v[i + 1];
-      doc.strokes[curIdx].points.push_back({cx, cy});
-      updateBounds(cx, cy);
-    } else {
-      cx = v[i];
-      cy = v[i + 1];
+      addPoint(cx, cy);
     }
   }
 }
