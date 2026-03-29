@@ -112,17 +112,18 @@ static HpglDoc mergedDoc() {
 
 static PenUpRenderer  g_penUpRenderer;
 static StrokeRenderer g_strokeRenderer;
+static HpglDoc        g_mergedDoc;   // cached — rebuilt only on load/change
 
 static void rebuildRenderers() {
-  HpglDoc merged = mergedDoc();
-  g_penUpRenderer.upload(merged);
-  g_strokeRenderer.upload(merged);
+  g_mergedDoc = mergedDoc();
+  g_penUpRenderer.upload(g_mergedDoc);
+  g_strokeRenderer.upload(g_mergedDoc);
 }
 
 static void rebuildPenUpRenderer() { rebuildRenderers(); }
 
 static void refreshDocStats() {
-  g_stats = computeDocStats(mergedDoc());
+  g_stats = computeDocStats(g_mergedDoc);
 }
 
 // ─── Layout
@@ -383,14 +384,13 @@ int main(int argc, char** argv) {
     ImGui::SeparatorText("Export");
     ImGui::BeginDisabled(g_activeLayer < 0);
     if (ImGui::Button("Export PNG")) {
-      HpglDoc merged = mergedDoc();
       std::string pngPath;
       if (g_activeLayer >= 0)
         pngPath = fs::path(g_layers[g_activeLayer].path)
                       .replace_extension(".png").string();
       else
         pngPath = "export.png";
-      if (exportPng(merged, g_pens, pngPath))
+      if (exportPng(g_mergedDoc, g_pens, pngPath))
         g_fixStatus = "PNG saved: " + pngPath;
       else
         g_fixStatus = "PNG export failed: " + pngPath;
@@ -468,7 +468,7 @@ int main(int argc, char** argv) {
     static ImVec2 lastCanvasSize = {0, 0};
     bool sizeChanged = (cW != lastCanvasSize.x || cH != lastCanvasSize.y);
     if (g_fitRequested || sizeChanged) {
-      auto vs = fitToCanvas(cW, cH, mergedDoc(), g_rotation);
+      auto vs = fitToCanvas(cW, cH, g_mergedDoc, g_rotation);
       g_scale = vs.scale; g_panX = vs.panX; g_panY = vs.panY;
     }
     g_fitRequested = false;
@@ -512,7 +512,7 @@ int main(int argc, char** argv) {
     DrawParams dp{g_panX, g_panY, g_scale, g_rotation,
                   g_showPenUp, g_penUpThreshold, g_fixLeftPct, g_pens,
                   g_showCoords};
-    drawHpgl(dl, canvasPos, cW, cH, mergedDoc(), dp,
+    drawHpgl(dl, canvasPos, cW, cH, g_mergedDoc, dp,
              g_penUpRenderer, g_strokeRenderer);
 
     // Stats overlay — top-right corner of canvas
