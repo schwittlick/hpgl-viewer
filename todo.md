@@ -19,5 +19,8 @@ done:
 done:
 - [x] viewport culling: per-stroke bounding boxes computed at parse time; drawHpgl skips strokes entirely outside the visible HPGL area — O(1) cull per stroke instead of submitting every segment to ImGui
 
+done:
+- [x] GPU stroke renderer: pen-down strokes moved from ImGui CPU draw list (900k AddLine calls/frame) to a VBO with up to 8 glDrawArrays calls per frame — StrokeRenderer in renderer.h/.cpp, uploaded on load/fix, drawn via ImGui draw callback
+
 todo:
 -

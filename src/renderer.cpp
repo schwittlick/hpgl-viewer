@@ -42,6 +42,34 @@ void main() {
 }
 )glsl";
 
+// Vertex shader for pen-down strokes (2-float vertices, same transform as pen-up).
+static const char *kStrokeVertSrc = R"glsl(
+#version 330 core
+layout(location = 0) in vec2 aPos;
+
+uniform float uScale, uCosR, uSinR, uPanX, uPanY;
+uniform float uOriginX, uOriginY, uCanvasW, uCanvasH;
+uniform float uDispX, uDispY, uDispW, uDispH;
+
+void main() {
+    float lx = aPos.x * uScale + uPanX - uCanvasW * 0.5;
+    float ly = aPos.y * uScale + uPanY - uCanvasH * 0.5;
+    float sx = uOriginX + lx * uCosR - ly * uSinR + uCanvasW * 0.5;
+    float sy = uOriginY + lx * uSinR + ly * uCosR + uCanvasH * 0.5;
+    gl_Position = vec4(
+        (sx - uDispX) / uDispW * 2.0 - 1.0,
+        1.0 - (sy - uDispY) / uDispH * 2.0,
+        0.0, 1.0);
+}
+)glsl";
+
+static const char *kStrokeFragSrc = R"glsl(
+#version 330 core
+uniform vec4 uColor;
+out vec4 fragColor;
+void main() { fragColor = uColor; }
+)glsl";
+
 static const char *kPenUpFragSrc = R"glsl(
 #version 330 core
 in float vLenSq;
@@ -227,6 +255,144 @@ void penUpRenderCallback(const ImDrawList*, const ImDrawCmd *cmd) {
   r->draw();
 }
 
+// ── GPU stroke renderer ───────────────────────────────────────────────────────
+
+void StrokeRenderer::init() {
+  auto compile = [](GLenum type, const char *src) -> GLuint {
+    GLuint s = glCreateShader(type);
+    glShaderSource(s, 1, &src, nullptr);
+    glCompileShader(s);
+    GLint ok = 0;
+    glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
+    if (!ok) {
+      char log[512];
+      glGetShaderInfoLog(s, sizeof(log), nullptr, log);
+      fprintf(stderr, "StrokeRenderer shader error: %s\n", log);
+    }
+    return s;
+  };
+  GLuint vert = compile(GL_VERTEX_SHADER,   kStrokeVertSrc);
+  GLuint frag = compile(GL_FRAGMENT_SHADER, kStrokeFragSrc);
+  program = glCreateProgram();
+  glAttachShader(program, vert);
+  glAttachShader(program, frag);
+  glLinkProgram(program);
+  {
+    GLint ok = 0;
+    glGetProgramiv(program, GL_LINK_STATUS, &ok);
+    if (!ok) {
+      char log[512];
+      glGetProgramInfoLog(program, sizeof(log), nullptr, log);
+      fprintf(stderr, "StrokeRenderer link error: %s\n", log);
+    }
+  }
+  glDeleteShader(vert);
+  glDeleteShader(frag);
+
+  uScale   = glGetUniformLocation(program, "uScale");
+  uCosR    = glGetUniformLocation(program, "uCosR");
+  uSinR    = glGetUniformLocation(program, "uSinR");
+  uPanX    = glGetUniformLocation(program, "uPanX");
+  uPanY    = glGetUniformLocation(program, "uPanY");
+  uOriginX = glGetUniformLocation(program, "uOriginX");
+  uOriginY = glGetUniformLocation(program, "uOriginY");
+  uCanvasW = glGetUniformLocation(program, "uCanvasW");
+  uCanvasH = glGetUniformLocation(program, "uCanvasH");
+  uDispX   = glGetUniformLocation(program, "uDispX");
+  uDispY   = glGetUniformLocation(program, "uDispY");
+  uDispW   = glGetUniformLocation(program, "uDispW");
+  uDispH   = glGetUniformLocation(program, "uDispH");
+  uColor   = glGetUniformLocation(program, "uColor");
+
+  glGenVertexArrays(1, &vao);
+  glGenBuffers(1, &vbo);
+  valid = true;
+}
+
+void StrokeRenderer::upload(const HpglDoc &doc) {
+  if (!valid) return;
+
+  // Collect line-segment vertex pairs per pen (skip single-point dot strokes).
+  std::vector<float> penData[8];
+  for (const auto &stroke : doc.strokes) {
+    if (stroke.points.size() < 2) continue;
+    if (stroke.points.size() == 2 && stroke.points[0] == stroke.points[1]) continue;
+    int pi = std::max(0, std::min(stroke.pen - 1, 7));
+    for (size_t i = 0; i + 1 < stroke.points.size(); ++i) {
+      penData[pi].push_back(stroke.points[i].x);
+      penData[pi].push_back(stroke.points[i].y);
+      penData[pi].push_back(stroke.points[i + 1].x);
+      penData[pi].push_back(stroke.points[i + 1].y);
+    }
+  }
+
+  // Concatenate into one VBO, record per-pen vertex offset/count.
+  std::vector<float> vboData;
+  int vertOffset = 0;
+  for (int i = 0; i < 8; ++i) {
+    ranges[i].offset = vertOffset;
+    ranges[i].count  = (int)(penData[i].size() / 2); // 2 floats per vertex
+    vboData.insert(vboData.end(), penData[i].begin(), penData[i].end());
+    vertOffset += ranges[i].count;
+  }
+
+  glBindVertexArray(vao);
+  glBindBuffer(GL_ARRAY_BUFFER, vbo);
+  glBufferData(GL_ARRAY_BUFFER,
+               (GLsizeiptr)(vboData.size() * sizeof(float)),
+               vboData.data(), GL_STATIC_DRAW);
+  constexpr int stride = 2 * sizeof(float);
+  glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, stride, (void*)0);
+  glEnableVertexAttribArray(0);
+  glBindVertexArray(0);
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
+}
+
+void StrokeRenderer::draw() const {
+  if (!valid || !pens) return;
+  glUseProgram(program);
+  glUniform1f(uScale,   scale);
+  glUniform1f(uCosR,    cosR);
+  glUniform1f(uSinR,    sinR);
+  glUniform1f(uPanX,    panX);
+  glUniform1f(uPanY,    panY);
+  glUniform1f(uOriginX, origin.x);
+  glUniform1f(uOriginY, origin.y);
+  glUniform1f(uCanvasW, cW);
+  glUniform1f(uCanvasH, cH);
+  glUniform1f(uDispX,   dispX);
+  glUniform1f(uDispY,   dispY);
+  glUniform1f(uDispW,   dispW);
+  glUniform1f(uDispH,   dispH);
+
+  glBindVertexArray(vao);
+  for (int i = 0; i < 8; ++i) {
+    if (ranges[i].count == 0) continue;
+    const auto &c = pens[i].color;
+    glUniform4f(uColor, c.x, c.y, c.z, c.w);
+    float lw = std::max(1.0f, pens[i].thickness * kHpglUnitsPerMm * scale);
+    glLineWidth(lw);
+    glDrawArrays(GL_LINES, ranges[i].offset, ranges[i].count);
+  }
+  glBindVertexArray(0);
+  glLineWidth(1.0f);
+}
+
+void strokeRenderCallback(const ImDrawList*, const ImDrawCmd *cmd) {
+  auto *r = static_cast<StrokeRenderer*>(cmd->UserCallbackData);
+
+  ImDrawData *dd = ImGui::GetDrawData();
+  float scaleX = dd->FramebufferScale.x, scaleY = dd->FramebufferScale.y;
+  float ox = dd->DisplayPos.x,           oy     = dd->DisplayPos.y;
+  int x1 = (int)((cmd->ClipRect.x - ox) * scaleX);
+  int y1 = (int)((cmd->ClipRect.y - oy) * scaleY);
+  int x2 = (int)((cmd->ClipRect.z - ox) * scaleX);
+  int y2 = (int)((cmd->ClipRect.w - oy) * scaleY);
+  glScissor(x1, r->fbH - y2, x2 - x1, y2 - y1);
+
+  r->draw();
+}
+
 // ── Coordinate system overlay ────────────────────────────────────────────────
 
 // Choose a grid step (in HPGL units) that yields 5–20 visible grid lines.
@@ -318,7 +484,8 @@ static void drawCoordinateSystem(ImDrawList *dl, ImVec2 origin,
 // ── Scene drawing ─────────────────────────────────────────────────────────────
 
 void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW, float canvasH,
-              const HpglDoc &doc, const DrawParams &p, PenUpRenderer &renderer) {
+              const HpglDoc &doc, const DrawParams &p,
+              PenUpRenderer &penUpRenderer, StrokeRenderer &strokeRenderer) {
   dl->PushClipRect(origin, {origin.x + canvasW, origin.y + canvasH}, true);
 
   float cosR = cosf(p.rotation);
@@ -327,69 +494,76 @@ void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW, float canvasH,
   if (p.showCoords)
     drawCoordinateSystem(dl, origin, canvasW, canvasH, doc, p);
 
-  // Compute visible HPGL AABB by inverse-transforming the 4 canvas corners.
-  // This gives a conservative bounding box used to cull off-screen strokes.
-  float visMinX =  1e30f, visMinY =  1e30f;
-  float visMaxX = -1e30f, visMaxY = -1e30f;
-  for (int ci = 0; ci < 4; ++ci) {
-    float cx = (ci & 1) ? canvasW : 0.f;
-    float cy = (ci & 2) ? canvasH : 0.f;
-    float lx = (cx - canvasW * 0.5f) * cosR + (cy - canvasH * 0.5f) * sinR;
-    float ly = -(cx - canvasW * 0.5f) * sinR + (cy - canvasH * 0.5f) * cosR;
-    float hx = (lx - p.panX + canvasW * 0.5f) / p.scale;
-    float hy = (ly - p.panY + canvasH * 0.5f) / p.scale;
-    visMinX = std::min(visMinX, hx); visMinY = std::min(visMinY, hy);
-    visMaxX = std::max(visMaxX, hx); visMaxY = std::max(visMaxY, hy);
+  // GPU pen-down strokes — one draw call per pen (up to 8 total).
+  if (strokeRenderer.valid) {
+    ImVec2 dp = ImGui::GetMainViewport()->Pos;
+    ImVec2 ds = ImGui::GetIO().DisplaySize;
+    strokeRenderer.origin = origin;
+    strokeRenderer.cW     = canvasW;
+    strokeRenderer.cH     = canvasH;
+    strokeRenderer.dispX  = dp.x;
+    strokeRenderer.dispY  = dp.y;
+    strokeRenderer.dispW  = ds.x;
+    strokeRenderer.dispH  = ds.y;
+    strokeRenderer.scale  = p.scale;
+    strokeRenderer.cosR   = cosR;
+    strokeRenderer.sinR   = sinR;
+    strokeRenderer.panX   = p.panX;
+    strokeRenderer.panY   = p.panY;
+    strokeRenderer.pens   = p.pens;
+    dl->AddCallback(strokeRenderCallback, &strokeRenderer);
+    dl->AddCallback(ImDrawCallback_ResetRenderState, nullptr);
   }
 
-  // Pen-down strokes (CPU path)
-  for (const auto &stroke : doc.strokes) {
-    if (stroke.points.empty()) continue;
-    // Cull strokes entirely outside the visible HPGL area
-    if (stroke.bboxMax.x < visMinX || stroke.bboxMin.x > visMaxX ||
-        stroke.bboxMax.y < visMinY || stroke.bboxMin.y > visMaxY) continue;
-    int pi = std::max(0, std::min(stroke.pen - 1, 7));
-    ImU32 col = ImGui::ColorConvertFloat4ToU32(p.pens[pi].color);
-    float screen_thick =
-        std::max(1.0f, p.pens[pi].thickness * kHpglUnitsPerMm * p.scale);
-
-    if (stroke.points.size() == 2 && stroke.points[0] == stroke.points[1]) {
+  // Dot strokes (single-point pen-8 waypoints) stay on CPU — there are very few.
+  {
+    float visMinX =  1e30f, visMinY =  1e30f;
+    float visMaxX = -1e30f, visMaxY = -1e30f;
+    for (int ci = 0; ci < 4; ++ci) {
+      float cx = (ci & 1) ? canvasW : 0.f;
+      float cy = (ci & 2) ? canvasH : 0.f;
+      float lx = (cx - canvasW * 0.5f) * cosR + (cy - canvasH * 0.5f) * sinR;
+      float ly = -(cx - canvasW * 0.5f) * sinR + (cy - canvasH * 0.5f) * cosR;
+      float hx = (lx - p.panX + canvasW * 0.5f) / p.scale;
+      float hy = (ly - p.panY + canvasH * 0.5f) / p.scale;
+      visMinX = std::min(visMinX, hx); visMinY = std::min(visMinY, hy);
+      visMaxX = std::max(visMaxX, hx); visMaxY = std::max(visMaxY, hy);
+    }
+    for (const auto &stroke : doc.strokes) {
+      if (stroke.points.size() != 2) continue;
+      if (!(stroke.points[0] == stroke.points[1])) continue;
+      if (stroke.bboxMax.x < visMinX || stroke.bboxMin.x > visMaxX ||
+          stroke.bboxMax.y < visMinY || stroke.bboxMin.y > visMaxY) continue;
+      int pi = std::max(0, std::min(stroke.pen - 1, 7));
+      ImU32 col = ImGui::ColorConvertFloat4ToU32(p.pens[pi].color);
+      float screen_thick = std::max(1.0f, p.pens[pi].thickness * kHpglUnitsPerMm * p.scale);
       ImVec2 pt = xfPoint(stroke.points[0].x, stroke.points[0].y, origin,
                           p.panX, p.panY, p.scale, canvasW, canvasH, cosR, sinR);
       dl->AddCircleFilled(pt, screen_thick * 0.5f, col);
-      continue;
-    }
-
-    for (size_t i = 0; i + 1 < stroke.points.size(); ++i) {
-      ImVec2 p0 = xfPoint(stroke.points[i].x,     stroke.points[i].y,     origin,
-                          p.panX, p.panY, p.scale, canvasW, canvasH, cosR, sinR);
-      ImVec2 p1 = xfPoint(stroke.points[i + 1].x, stroke.points[i + 1].y, origin,
-                          p.panX, p.panY, p.scale, canvasW, canvasH, cosR, sinR);
-      dl->AddLine(p0, p1, col, screen_thick);
     }
   }
 
   // Pen-up moves — drawn via GPU VBO (one draw call for all segments)
-  if (p.showPenUp && renderer.valid && renderer.vertexCount > 0) {
+  if (p.showPenUp && penUpRenderer.valid && penUpRenderer.vertexCount > 0) {
     float t  = p.penUpThreshold * kHpglUnitsPerCm;
     float cx = doc.minX + (p.fixLeftPct / 100.0f) * (doc.maxX - doc.minX);
     ImVec2 dp = ImGui::GetMainViewport()->Pos;
     ImVec2 ds = ImGui::GetIO().DisplaySize;
-    renderer.origin      = origin;
-    renderer.cW          = canvasW;
-    renderer.cH          = canvasH;
-    renderer.thresholdSq = t * t;
-    renderer.cutoffX     = cx;
-    renderer.dispX       = dp.x;
-    renderer.dispY       = dp.y;
-    renderer.dispW       = ds.x;
-    renderer.dispH       = ds.y;
-    renderer.scale       = p.scale;
-    renderer.cosR        = cosR;
-    renderer.sinR        = sinR;
-    renderer.panX        = p.panX;
-    renderer.panY        = p.panY;
-    dl->AddCallback(penUpRenderCallback, &renderer);
+    penUpRenderer.origin      = origin;
+    penUpRenderer.cW          = canvasW;
+    penUpRenderer.cH          = canvasH;
+    penUpRenderer.thresholdSq = t * t;
+    penUpRenderer.cutoffX     = cx;
+    penUpRenderer.dispX       = dp.x;
+    penUpRenderer.dispY       = dp.y;
+    penUpRenderer.dispW       = ds.x;
+    penUpRenderer.dispH       = ds.y;
+    penUpRenderer.scale       = p.scale;
+    penUpRenderer.cosR        = cosR;
+    penUpRenderer.sinR        = sinR;
+    penUpRenderer.panX        = p.panX;
+    penUpRenderer.panY        = p.panY;
+    dl->AddCallback(penUpRenderCallback, &penUpRenderer);
     dl->AddCallback(ImDrawCallback_ResetRenderState, nullptr);
 
     // Draw vertical cutoff line in HPGL space

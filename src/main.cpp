@@ -110,11 +110,16 @@ static HpglDoc mergedDoc() {
   return m;
 }
 
-static PenUpRenderer g_penUpRenderer;
+static PenUpRenderer  g_penUpRenderer;
+static StrokeRenderer g_strokeRenderer;
 
-static void rebuildPenUpRenderer() {
-  g_penUpRenderer.upload(mergedDoc());
+static void rebuildRenderers() {
+  HpglDoc merged = mergedDoc();
+  g_penUpRenderer.upload(merged);
+  g_strokeRenderer.upload(merged);
 }
+
+static void rebuildPenUpRenderer() { rebuildRenderers(); }
 
 static void refreshDocStats() {
   g_stats = computeDocStats(mergedDoc());
@@ -216,6 +221,7 @@ int main(int argc, char** argv) {
   ImGui_ImplOpenGL3_Init("#version 330");
 
   g_penUpRenderer.init();
+  g_strokeRenderer.init();
 
   initPenColors(g_pens);
   g_lastOpenDir = configLoad("last_open_dir");
@@ -501,11 +507,13 @@ int main(int argc, char** argv) {
       g_scale *= factor;
     }
 
-    g_penUpRenderer.fbH = g_fbH;
+    g_penUpRenderer.fbH  = g_fbH;
+    g_strokeRenderer.fbH = g_fbH;
     DrawParams dp{g_panX, g_panY, g_scale, g_rotation,
                   g_showPenUp, g_penUpThreshold, g_fixLeftPct, g_pens,
                   g_showCoords};
-    drawHpgl(dl, canvasPos, cW, cH, mergedDoc(), dp, g_penUpRenderer);
+    drawHpgl(dl, canvasPos, cW, cH, mergedDoc(), dp,
+             g_penUpRenderer, g_strokeRenderer);
 
     // Stats overlay — top-right corner of canvas
     {
