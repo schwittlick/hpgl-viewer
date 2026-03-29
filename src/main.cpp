@@ -223,6 +223,13 @@ int main(int argc, char** argv) {
   if (argc > 1)
     loadFile(argv[1]);
 
+  glfwSetDropCallback(window, [](GLFWwindow*, int count, const char** paths) {
+    bool replace = g_layers.empty();
+    for (int i = 0; i < count; ++i) {
+      loadFile(paths[i], replace && i == 0);
+    }
+  });
+
   while (!glfwWindowShouldClose(window)) {
     glfwWaitEvents();
 
@@ -249,6 +256,10 @@ int main(int argc, char** argv) {
       if (ImGui::IsKeyPressed(ImGuiKey_O)) {
         std::string path = openFileDialog();
         if (!path.empty()) loadFile(path);
+      }
+      if (ImGui::IsKeyPressed(ImGuiKey_A)) {
+        std::string path = openFileDialog();
+        if (!path.empty()) loadFile(path, /*replace=*/false);
       }
     }
 
