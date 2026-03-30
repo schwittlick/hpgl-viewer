@@ -325,6 +325,12 @@ int main(int argc, char** argv) {
       }
       ImGui::SameLine();
 
+      // Color swatch — shows the pen color assigned to this layer by index
+      ImGui::ColorButton("##col", g_pens[i % 8].color,
+                         ImGuiColorEditFlags_NoTooltip |
+                         ImGuiColorEditFlags_NoBorder, {12, 12});
+      ImGui::SameLine();
+
       // Layer name — click to activate
       std::string name = fs::path(l.path).filename().string();
       if (l.hasFixed) name += " *";
