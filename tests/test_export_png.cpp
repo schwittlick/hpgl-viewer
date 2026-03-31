@@ -31,7 +31,7 @@ static std::string tmpPath(const char *suffix) {
 
 static void testEmptyDocReturnsFalse() {
   HpglDoc empty;
-  PenStyle pens[8];
+  PenStyle pens[10];
   for (auto &p : pens) p = defaultPens();
   bool ok = exportPng(empty, pens, tmpPath("_empty.png"));
   REQUIRE(!ok);
@@ -39,7 +39,7 @@ static void testEmptyDocReturnsFalse() {
 
 static void testSimpleDocProducesFile() {
   HpglDoc doc = makeDoc(0, 0, 4000, 4000); // 100mm × 100mm
-  PenStyle pens[8];
+  PenStyle pens[10];
   for (auto &p : pens) p = defaultPens();
   std::string path = tmpPath("_simple.png");
   bool ok = exportPng(doc, pens, path, 200);
@@ -58,7 +58,7 @@ static void testSimpleDocProducesFile() {
 
 static void testUnwritablePathReturnsFalse() {
   HpglDoc doc = makeDoc(0, 0, 4000, 4000);
-  PenStyle pens[8];
+  PenStyle pens[10];
   for (auto &p : pens) p = defaultPens();
   bool ok = exportPng(doc, pens, "/nonexistent_dir/out.png", 200);
   REQUIRE(!ok);
@@ -70,7 +70,7 @@ static void testMultipleStrokes() {
   doc.strokes.push_back(Stroke{{{0,0},{2000,0}}, 1});
   doc.strokes.push_back(Stroke{{{0,2000},{4000,2000}}, 2});
   doc.strokes.push_back(Stroke{{{3000,3000},{3000,3000}}, 3}); // dot stroke
-  PenStyle pens[8];
+  PenStyle pens[10];
   for (auto &p : pens) p = defaultPens();
   std::string path = tmpPath("_multi.png");
   bool ok = exportPng(doc, pens, path, 200);
@@ -81,7 +81,7 @@ static void testMultipleStrokes() {
 static void testWidthDeterminesOutputSize() {
   // Just ensure it doesn't crash with a small width
   HpglDoc doc = makeDoc(0, 0, 4000, 2000);
-  PenStyle pens[8];
+  PenStyle pens[10];
   for (auto &p : pens) p = defaultPens();
   std::string path = tmpPath("_small.png");
   bool ok = exportPng(doc, pens, path, 50);

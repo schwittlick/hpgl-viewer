@@ -90,7 +90,7 @@ static bool writePng(const std::string &path, const std::vector<uint8_t> &pixels
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-bool exportPng(const HpglDoc &doc, const PenStyle pens[8],
+bool exportPng(const HpglDoc &doc, const PenStyle pens[10],
                const std::string &path, float dpi) {
   if (doc.empty()) return false;
 
@@ -120,7 +120,7 @@ bool exportPng(const HpglDoc &doc, const PenStyle pens[8],
   for (const auto &stroke : doc.strokes) {
     if (stroke.points.empty()) continue;
 
-    int pi = std::max(0, std::min(stroke.pen - 1, 7));
+    int pi = std::max(0, std::min(stroke.pen - 1, 9));
     // Convert ImVec4 colour [0,1] → [0,255]
     uint8_t red = static_cast<uint8_t>(pens[pi].color.x * 255.f);
     uint8_t grn = static_cast<uint8_t>(pens[pi].color.y * 255.f);

@@ -11,6 +11,3 @@ Whenever new functionality is added — new UI controls, keyboard shortcuts, CLI
 
 Do not leave documentation out of sync with the code.
 
-## Commits
-
-After completing each feature or fix, create a git commit immediately. Do not batch multiple features into one commit. Each commit should be self-contained and buildable.

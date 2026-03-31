@@ -136,36 +136,53 @@ static void test_roundtrip_negative_coords() {
 
 // ── initPenColors ─────────────────────────────────────────────────────────────
 
-static void test_init_pen_colors_pen1_is_dark() {
-  PenStyle pens[8];
+static void test_init_pen_colors_pen1_is_red() {
+  PenStyle pens[10];
   initPenColors(pens);
-  // Pen 1 (index 0) should be near-black
-  REQUIRE(pens[0].color.x < 0.2f);
-  REQUIRE(pens[0].color.y < 0.2f);
-  REQUIRE(pens[0].color.z < 0.2f);
+  // Pen 1 (index 0) should be red dominant
+  REQUIRE(pens[0].color.x > 0.5f);
+  REQUIRE(pens[0].color.y < 0.3f);
+  REQUIRE(pens[0].color.z < 0.3f);
   REQUIRE(pens[0].color.w == 1.0f);
 }
 
-static void test_init_pen_colors_pen2_is_red() {
-  PenStyle pens[8];
+static void test_init_pen_colors_pen6_is_dark() {
+  PenStyle pens[10];
   initPenColors(pens);
-  // Pen 2 (index 1): red dominant
-  REQUIRE(pens[1].color.x > 0.5f);
-  REQUIRE(pens[1].color.y < 0.3f);
-  REQUIRE(pens[1].color.z < 0.3f);
+  // Pen 6 (index 5) should be near-black
+  REQUIRE(pens[5].color.x < 0.2f);
+  REQUIRE(pens[5].color.y < 0.2f);
+  REQUIRE(pens[5].color.z < 0.2f);
+}
+
+static void test_init_pen_colors_all_ten_distinct() {
+  PenStyle pens[10];
+  initPenColors(pens);
+  // Verify each pen has the expected dominant channel (the 10 hardcoded colors).
+  // Index: 0=red, 1=green, 2=blue, 3=orange, 4=brown, 5=black, 6=yellow, 7=purple, 8=light-blue, 9=magenta
+  REQUIRE(pens[0].color.x > 0.5f && pens[0].color.y < 0.3f && pens[0].color.z < 0.3f); // red
+  REQUIRE(pens[1].color.y > 0.4f && pens[1].color.x < 0.3f && pens[1].color.z < 0.3f); // green
+  REQUIRE(pens[2].color.z > 0.4f && pens[2].color.x < 0.3f && pens[2].color.y < 0.3f); // blue
+  REQUIRE(pens[3].color.x > 0.5f && pens[3].color.y > 0.3f && pens[3].color.z < 0.3f); // orange (R>G>B)
+  REQUIRE(pens[4].color.x > pens[4].color.z && pens[4].color.y > pens[4].color.z);      // brown (warm)
+  REQUIRE(pens[5].color.x < 0.1f && pens[5].color.y < 0.1f && pens[5].color.z < 0.1f); // black
+  REQUIRE(pens[6].color.x > 0.5f && pens[6].color.y > 0.5f && pens[6].color.z < 0.3f); // yellow
+  REQUIRE(pens[7].color.z > 0.3f && pens[7].color.x > 0.0f && pens[7].color.y < 0.2f); // purple
+  REQUIRE(pens[8].color.z > 0.5f && pens[8].color.x < pens[8].color.z);                 // light blue
+  REQUIRE(pens[9].color.x > 0.5f && pens[9].color.z > 0.5f && pens[9].color.y < 0.3f); // magenta
 }
 
 static void test_init_pen_colors_all_fully_opaque() {
-  PenStyle pens[8];
+  PenStyle pens[10];
   initPenColors(pens);
-  for (int i = 0; i < 8; ++i)
+  for (int i = 0; i < 10; ++i)
     REQUIRE(pens[i].color.w == 1.0f);
 }
 
 static void test_init_pen_colors_default_thickness() {
-  PenStyle pens[8];
+  PenStyle pens[10];
   initPenColors(pens);
-  for (int i = 0; i < 8; ++i)
+  for (int i = 0; i < 10; ++i)
     REQUIRE(pens[i].thickness == 0.3f);
 }
 
@@ -184,8 +201,9 @@ int main() {
   run("roundtrip 45° rotation",           test_roundtrip_45deg_rotation);
   run("roundtrip 90° rotation",           test_roundtrip_90deg_rotation);
   run("roundtrip negative coords",        test_roundtrip_negative_coords);
-  run("initPenColors pen1 is dark",       test_init_pen_colors_pen1_is_dark);
-  run("initPenColors pen2 is red",        test_init_pen_colors_pen2_is_red);
+  run("initPenColors pen1 is red",        test_init_pen_colors_pen1_is_red);
+  run("initPenColors pen6 is dark",       test_init_pen_colors_pen6_is_dark);
+  run("initPenColors all 10 distinct",    test_init_pen_colors_all_ten_distinct);
   run("initPenColors all opaque",         test_init_pen_colors_all_fully_opaque);
   run("initPenColors default thickness",  test_init_pen_colors_default_thickness);
 
