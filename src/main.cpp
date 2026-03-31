@@ -84,8 +84,8 @@ static bool g_isFullscreen = false;
 static int g_windowedX = 100, g_windowedY = 100;
 static int g_windowedW = 1400, g_windowedH = 900;
 
-// pen styles (up to 8 pens)
-static PenStyle g_pens[8];
+// pen styles (up to 10 pens)
+static PenStyle g_pens[10];
 
 static std::string g_fixStatus;
 
@@ -95,10 +95,14 @@ static std::string g_fixStatus;
 // Combine all visible layer strokes into one doc for rendering / pen-up GPU.
 static HpglDoc mergedDoc() {
   HpglDoc m;
-  for (const auto &l : g_layers) {
+  for (int li = 0; li < static_cast<int>(g_layers.size()); ++li) {
+    const Layer &l = g_layers[li];
     if (!l.visible) continue;
-    for (const auto &s : l.doc.strokes)
+    int layerPen = (li % 8) + 1; // layer 0→pen1, layer 1→pen2, …
+    for (auto s : l.doc.strokes) {
+      s.pen = layerPen;
       m.strokes.push_back(s);
+    }
     if (!l.doc.empty()) {
       m.minX = std::min(m.minX, l.doc.minX);
       m.minY = std::min(m.minY, l.doc.minY);
@@ -191,6 +195,20 @@ static void applyFix() {
   refreshDocStats();
   g_fitRequested = true;
   g_fixStatus = "Fixed (not yet saved)";
+}
+
+static void applyMerge() {
+  if (g_activeLayer < 0 || g_activeLayer >= static_cast<int>(g_layers.size()))
+    return;
+  Layer &l = g_layers[g_activeLayer];
+  float thresholds[10];
+  for (int i = 0; i < 10; ++i)
+    thresholds[i] = g_pens[i].thickness * kHpglUnitsPerMm;
+  l.doc = mergeCloseStrokes(l.doc, thresholds);
+  l.hasFixed = true;
+  rebuildPenUpRenderer();
+  refreshDocStats();
+  g_fixStatus = "Merged (not yet saved)";
 }
 
 // ─── Main
@@ -326,7 +344,7 @@ int main(int argc, char** argv) {
       ImGui::SameLine();
 
       // Color swatch — shows the pen color assigned to this layer by index
-      ImGui::ColorButton("##col", g_pens[i % 8].color,
+      ImGui::ColorButton("##col", g_pens[i % 10].color,
                          ImGuiColorEditFlags_NoTooltip |
                          ImGuiColorEditFlags_NoBorder, {12, 12});
       ImGui::SameLine();
@@ -369,11 +387,12 @@ int main(int argc, char** argv) {
     ImGui::BeginDisabled(g_activeLayer < 0);
     if (ImGui::Button("Fix long pen-up jumps  [E]"))
       applyFix();
+    if (ImGui::Button("Merge close strokes"))
+      applyMerge();
     bool activeHasFixed = g_activeLayer >= 0 &&
                           g_layers[g_activeLayer].hasFixed;
     ImGui::BeginDisabled(!activeHasFixed);
-    ImGui::SameLine();
-    if (ImGui::Button("Export")) {
+    if (ImGui::Button("Export HPGL")) {
       Layer &al = g_layers[g_activeLayer];
       std::string out = fixedPath(al.path);
       if (exportHpgl(al.doc, out)) {
@@ -430,7 +449,7 @@ int main(int argc, char** argv) {
     static const char *kPenWidthLabels[] = {"0.3 mm", "0.4 mm", "0.5 mm",
                                             "0.6 mm", "0.8 mm", "1.0 mm"};
     constexpr int kNumWidths = 6;
-    for (int i = 0; i < 8; ++i) {
+    for (int i = 0; i < 10; ++i) {
       ImGui::PushID(i);
       char label[16];
       snprintf(label, sizeof(label), "Pen %d", i + 1);

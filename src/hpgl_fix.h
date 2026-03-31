@@ -29,6 +29,12 @@ struct DocStats {
 // Empty strokes (no points) are excluded from numPaths.
 DocStats computeDocStats(const HpglDoc &doc);
 
+// Merge consecutive same-pen strokes whose gap (end of A → start of B) is
+// ≤ the per-pen threshold given in HPGL units (thresholdsUnits[i] applies to
+// pen i+1).  Chain-merging is applied: A→B→C are all merged when each
+// consecutive gap is within threshold.
+HpglDoc mergeCloseStrokes(const HpglDoc &src, const float thresholdsUnits[10]);
+
 // Derive the output path for an exported fix: inserts "_fixed" before the
 // last extension, or appends "_fixed.hpgl" if there is no extension.
 std::string fixedPath(const std::string &src);

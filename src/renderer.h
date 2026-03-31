@@ -20,8 +20,8 @@ struct PenStyle {
   float  thickness = 0.3f; // mm
 };
 
-// Fill pens[0..7] with default colours.
-void initPenColors(PenStyle pens[8]);
+// Fill pens[0..9] with default colours.
+void initPenColors(PenStyle pens[10]);
 
 // ── Coordinate helpers ────────────────────────────────────────────────────────
 
@@ -71,7 +71,7 @@ struct StrokeRenderer {
   bool   valid = false;
 
   struct PenRange { int offset = 0; int count = 0; };
-  PenRange ranges[8];
+  PenRange ranges[10];
 
   // Per-frame context — set before the ImGui draw callback fires.
   ImVec2 origin{};
@@ -85,7 +85,7 @@ struct StrokeRenderer {
   GLint uScale=-1, uCosR=-1, uSinR=-1, uPanX=-1, uPanY=-1;
   GLint uOriginX=-1, uOriginY=-1, uCanvasW=-1, uCanvasH=-1;
   GLint uDispX=-1, uDispY=-1, uDispW=-1, uDispH=-1;
-  GLint uColor=-1;
+  GLint uColor=-1, uHalfWidth=-1;
 
   void init();
   void upload(const HpglDoc &doc);

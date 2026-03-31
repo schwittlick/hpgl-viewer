@@ -37,6 +37,42 @@ HpglDoc fixLongPenUps(const HpglDoc &src, float thresholdUnits,
   return result;
 }
 
+HpglDoc mergeCloseStrokes(const HpglDoc &src, const float thresholdsUnits[10]) {
+  HpglDoc result;
+  result.minX = src.minX; result.maxX = src.maxX;
+  result.minY = src.minY; result.maxY = src.maxY;
+
+  for (const auto &stroke : src.strokes) {
+    if (stroke.points.empty()) { result.strokes.push_back(stroke); continue; }
+
+    if (!result.strokes.empty()) {
+      Stroke &last = result.strokes.back();
+      if (!last.points.empty() && last.pen == stroke.pen) {
+        int penIdx = stroke.pen - 1;
+        float threshold = (penIdx >= 0 && penIdx < 10) ? thresholdsUnits[penIdx] : 0.0f;
+        Vec2  endPrev   = last.points.back();
+        Vec2  startCur  = stroke.points.front();
+        float dx        = startCur.x - endPrev.x;
+        float dy        = startCur.y - endPrev.y;
+        float distSq    = dx*dx + dy*dy;
+        if (distSq <= threshold * threshold) {
+          for (const auto &p : stroke.points)
+            last.points.push_back(p);
+          last.bboxMin.x = std::min(last.bboxMin.x, stroke.bboxMin.x);
+          last.bboxMin.y = std::min(last.bboxMin.y, stroke.bboxMin.y);
+          last.bboxMax.x = std::max(last.bboxMax.x, stroke.bboxMax.x);
+          last.bboxMax.y = std::max(last.bboxMax.y, stroke.bboxMax.y);
+          continue;
+        }
+      }
+    }
+
+    result.strokes.push_back(stroke);
+  }
+
+  return result;
+}
+
 bool exportHpgl(const HpglDoc &doc, const std::string &path) {
   FILE *f = fopen(path.c_str(), "w");
   if (!f) return false;

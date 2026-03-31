@@ -24,6 +24,7 @@ A lightweight HPGL file viewer built with Dear ImGui + OpenGL3 + GLFW.
   - **Threshold** slider: minimum move length to flag/fix (cm)
   - **Waypoint spacing** slider: distance between inserted dots (cm)
   - **Left zone** slider: only fix moves that start within the leftmost X% of the document
+- Merge close strokes: combines consecutive same-pen strokes whose gap (end→start) is ≤ the pen's configured width, eliminating unnecessary pen-up/down movements between nearly-adjacent strokes; chains of strokes are merged together
 - PNG export at physical DPI
 
 ## Keyboard shortcuts

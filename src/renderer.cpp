@@ -42,32 +42,75 @@ void main() {
 }
 )glsl";
 
-// Vertex shader for pen-down strokes (2-float vertices, same transform as pen-up).
+// Vertex shader for pen-down strokes.
+// Each segment is a quad extended by uHalfWidth beyond both endpoints (for caps).
+// aPos  = HPGL position of this corner (p0 or p1).
+// aP0/aP1 = canonical segment start/end (same for all 6 vertices of a segment).
+// aSide = +1 or -1: perpendicular side.
+// Outputs local capsule coordinates (vU along axis, vV perpendicular) for the SDF.
 static const char *kStrokeVertSrc = R"glsl(
 #version 330 core
-layout(location = 0) in vec2 aPos;
+layout(location = 0) in vec2  aPos;
+layout(location = 1) in vec2  aP0;
+layout(location = 2) in vec2  aP1;
+layout(location = 3) in float aSide;
 
 uniform float uScale, uCosR, uSinR, uPanX, uPanY;
 uniform float uOriginX, uOriginY, uCanvasW, uCanvasH;
 uniform float uDispX, uDispY, uDispW, uDispH;
+uniform float uHalfWidth;
+
+flat out float vL;
+out float vU;
+out float vV;
+
+vec2 toScreen(vec2 p) {
+    float lx = p.x * uScale + uPanX - uCanvasW * 0.5;
+    float ly = p.y * uScale + uPanY - uCanvasH * 0.5;
+    return vec2(uOriginX + lx * uCosR - ly * uSinR + uCanvasW * 0.5,
+                uOriginY + lx * uSinR + ly * uCosR + uCanvasH * 0.5);
+}
 
 void main() {
-    float lx = aPos.x * uScale + uPanX - uCanvasW * 0.5;
-    float ly = aPos.y * uScale + uPanY - uCanvasH * 0.5;
-    float sx = uOriginX + lx * uCosR - ly * uSinR + uCanvasW * 0.5;
-    float sy = uOriginY + lx * uSinR + ly * uCosR + uCanvasH * 0.5;
+    vec2 sp  = toScreen(aPos);
+    vec2 sp0 = toScreen(aP0);
+    vec2 sp1 = toScreen(aP1);
+    vec2 d   = sp1 - sp0;
+    float L  = length(d);
+    vL = L;
+    vec2 dir  = (L > 0.0001) ? d / L : vec2(1.0, 0.0);
+    vec2 perp = vec2(-dir.y, dir.x);
+
+    // Extend the quad outward along the axis at both ends for the rounded cap region.
+    float u_base   = dot(sp - sp0, dir);
+    float end_sign = (u_base > L * 0.5) ? 1.0 : -1.0;
+    vec2  s        = sp + perp * aSide * uHalfWidth + dir * end_sign * uHalfWidth;
+
+    vU = u_base + end_sign * uHalfWidth;
+    vV = aSide * uHalfWidth;
+
     gl_Position = vec4(
-        (sx - uDispX) / uDispW * 2.0 - 1.0,
-        1.0 - (sy - uDispY) / uDispH * 2.0,
+        (s.x - uDispX) / uDispW * 2.0 - 1.0,
+        1.0 - (s.y - uDispY) / uDispH * 2.0,
         0.0, 1.0);
 }
 )glsl";
 
 static const char *kStrokeFragSrc = R"glsl(
 #version 330 core
+flat in float vL;
+in float vU;
+in float vV;
+uniform float uHalfWidth;
 uniform vec4 uColor;
 out vec4 fragColor;
-void main() { fragColor = uColor; }
+void main() {
+    // Capsule SDF: distance from this fragment to the nearest point on the segment.
+    float nearest_u = clamp(vU, 0.0, vL);
+    float dist = length(vec2(nearest_u - vU, vV));
+    if (dist > uHalfWidth) discard;
+    fragColor = uColor;
+}
 )glsl";
 
 static const char *kPenUpFragSrc = R"glsl(
@@ -92,18 +135,20 @@ void main() {
 
 // ── Pen styling ───────────────────────────────────────────────────────────────
 
-void initPenColors(PenStyle pens[8]) {
+void initPenColors(PenStyle pens[10]) {
   ImVec4 defaults[] = {
-      {0.05f, 0.05f, 0.05f, 1}, // 1 black
-      {0.8f,  0.1f,  0.1f,  1}, // 2 red
-      {0.1f,  0.5f,  0.1f,  1}, // 3 green
-      {0.1f,  0.1f,  0.8f,  1}, // 4 blue
-      {0.7f,  0.5f,  0.0f,  1}, // 5 orange
-      {0.5f,  0.0f,  0.5f,  1}, // 6 purple
-      {0.0f,  0.5f,  0.5f,  1}, // 7 teal
-      {0.4f,  0.4f,  0.4f,  1}, // 8 grey
+      {1.00f, 0.00f, 0.00f, 1}, // 1  red
+      {0.00f, 0.60f, 0.00f, 1}, // 2  green
+      {0.00f, 0.00f, 0.70f, 1}, // 3  blue
+      {1.00f, 0.65f, 0.00f, 1}, // 4  orange
+      {0.35f, 0.15f, 0.03f, 1}, // 5  brown
+      {0.00f, 0.00f, 0.00f, 1}, // 6  black
+      {1.00f, 1.00f, 0.00f, 1}, // 7  yellow
+      {0.40f, 0.00f, 0.60f, 1}, // 8  purple
+      {0.45f, 0.65f, 1.00f, 1}, // 9  light blue
+      {1.00f, 0.00f, 1.00f, 1}, // 10 magenta
   };
-  for (int i = 0; i < 8; ++i)
+  for (int i = 0; i < 10; ++i)
     pens[i].color = defaults[i];
 }
 
@@ -302,7 +347,8 @@ void StrokeRenderer::init() {
   uDispY   = glGetUniformLocation(program, "uDispY");
   uDispW   = glGetUniformLocation(program, "uDispW");
   uDispH   = glGetUniformLocation(program, "uDispH");
-  uColor   = glGetUniformLocation(program, "uColor");
+  uColor     = glGetUniformLocation(program, "uColor");
+  uHalfWidth = glGetUniformLocation(program, "uHalfWidth");
 
   glGenVertexArrays(1, &vao);
   glGenBuffers(1, &vbo);
@@ -312,26 +358,41 @@ void StrokeRenderer::init() {
 void StrokeRenderer::upload(const HpglDoc &doc) {
   if (!valid) return;
 
-  // Collect line-segment vertex pairs per pen (skip single-point dot strokes).
-  std::vector<float> penData[8];
+  // Each segment is rendered as a quad extended beyond both endpoints for rounded caps.
+  // Vertex layout: (pos.x, pos.y, p0.x, p0.y, p1.x, p1.y, side) — 7 floats per vertex.
+  // p0/p1 are the canonical segment endpoints (same for all 6 vertices of a segment).
+  // Skip single-point dot strokes (handled by CPU dot renderer).
+  std::vector<float> penData[10];
   for (const auto &stroke : doc.strokes) {
     if (stroke.points.size() < 2) continue;
     if (stroke.points.size() == 2 && stroke.points[0] == stroke.points[1]) continue;
-    int pi = std::max(0, std::min(stroke.pen - 1, 7));
+    int pi = std::max(0, std::min(stroke.pen - 1, 9));
     for (size_t i = 0; i + 1 < stroke.points.size(); ++i) {
-      penData[pi].push_back(stroke.points[i].x);
-      penData[pi].push_back(stroke.points[i].y);
-      penData[pi].push_back(stroke.points[i + 1].x);
-      penData[pi].push_back(stroke.points[i + 1].y);
+      float x0 = stroke.points[i].x,   y0 = stroke.points[i].y;
+      float x1 = stroke.points[i+1].x, y1 = stroke.points[i+1].y;
+      // Two triangles (A,B,D) and (A,D,C) where:
+      //   A = p0 top, B = p0 bottom, C = p1 top, D = p1 bottom
+      // Layout: (pos, p0, p1, side)
+      float verts[6][7] = {
+        {x0, y0,  x0, y0, x1, y1,  +1.f}, // A
+        {x0, y0,  x0, y0, x1, y1,  -1.f}, // B
+        {x1, y1,  x0, y0, x1, y1,  -1.f}, // D
+        {x0, y0,  x0, y0, x1, y1,  +1.f}, // A
+        {x1, y1,  x0, y0, x1, y1,  -1.f}, // D
+        {x1, y1,  x0, y0, x1, y1,  +1.f}, // C
+      };
+      for (auto &v : verts)
+        for (float f : v)
+          penData[pi].push_back(f);
     }
   }
 
   // Concatenate into one VBO, record per-pen vertex offset/count.
   std::vector<float> vboData;
   int vertOffset = 0;
-  for (int i = 0; i < 8; ++i) {
+  for (int i = 0; i < 10; ++i) {
     ranges[i].offset = vertOffset;
-    ranges[i].count  = (int)(penData[i].size() / 2); // 2 floats per vertex
+    ranges[i].count  = (int)(penData[i].size() / 7); // 7 floats per vertex
     vboData.insert(vboData.end(), penData[i].begin(), penData[i].end());
     vertOffset += ranges[i].count;
   }
@@ -341,9 +402,15 @@ void StrokeRenderer::upload(const HpglDoc &doc) {
   glBufferData(GL_ARRAY_BUFFER,
                (GLsizeiptr)(vboData.size() * sizeof(float)),
                vboData.data(), GL_STATIC_DRAW);
-  constexpr int stride = 2 * sizeof(float);
-  glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, stride, (void*)0);
+  constexpr int stride = 7 * sizeof(float);
+  glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, stride, (void*)0);                    // aPos
   glEnableVertexAttribArray(0);
+  glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, stride, (void*)(2 * sizeof(float)));  // aP0
+  glEnableVertexAttribArray(1);
+  glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, stride, (void*)(4 * sizeof(float)));  // aP1
+  glEnableVertexAttribArray(2);
+  glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, stride, (void*)(6 * sizeof(float)));  // aSide
+  glEnableVertexAttribArray(3);
   glBindVertexArray(0);
   glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
@@ -366,16 +433,14 @@ void StrokeRenderer::draw() const {
   glUniform1f(uDispH,   dispH);
 
   glBindVertexArray(vao);
-  for (int i = 0; i < 8; ++i) {
+  for (int i = 0; i < 10; ++i) {
     if (ranges[i].count == 0) continue;
     const auto &c = pens[i].color;
     glUniform4f(uColor, c.x, c.y, c.z, c.w);
-    float lw = std::max(1.0f, pens[i].thickness * kHpglUnitsPerMm * scale);
-    glLineWidth(lw);
-    glDrawArrays(GL_LINES, ranges[i].offset, ranges[i].count);
+    glUniform1f(uHalfWidth, pens[i].thickness * kHpglUnitsPerMm * scale * 0.5f);
+    glDrawArrays(GL_TRIANGLES, ranges[i].offset, ranges[i].count);
   }
   glBindVertexArray(0);
-  glLineWidth(1.0f);
 }
 
 void strokeRenderCallback(const ImDrawList*, const ImDrawCmd *cmd) {
@@ -534,7 +599,7 @@ void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW, float canvasH,
       if (!(stroke.points[0] == stroke.points[1])) continue;
       if (stroke.bboxMax.x < visMinX || stroke.bboxMin.x > visMaxX ||
           stroke.bboxMax.y < visMinY || stroke.bboxMin.y > visMaxY) continue;
-      int pi = std::max(0, std::min(stroke.pen - 1, 7));
+      int pi = std::max(0, std::min(stroke.pen - 1, 9));
       ImU32 col = ImGui::ColorConvertFloat4ToU32(p.pens[pi].color);
       float screen_thick = std::max(1.0f, p.pens[pi].thickness * kHpglUnitsPerMm * p.scale);
       ImVec2 pt = xfPoint(stroke.points[0].x, stroke.points[0].y, origin,
