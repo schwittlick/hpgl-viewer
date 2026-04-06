@@ -73,7 +73,7 @@ HpglDoc mergeCloseStrokes(const HpglDoc &src, const float thresholdsUnits[10]) {
   return result;
 }
 
-bool exportHpgl(const HpglDoc &doc, const std::string &path) {
+bool exportHpgl(const HpglDoc &doc, const std::string &path, int vsValue) {
   FILE *f = fopen(path.c_str(), "w");
   if (!f) return false;
 
@@ -90,6 +90,7 @@ bool exportHpgl(const HpglDoc &doc, const std::string &path) {
     if (stroke.points.size() == 1) {
       fprintf(f, "PD;\n");
     } else {
+      fprintf(f, "VS%d;\n", vsValue);
       fprintf(f, "PD");
       for (size_t i = 1; i < stroke.points.size(); ++i) {
         if (i > 1) fputc(',', f);

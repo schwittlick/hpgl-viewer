@@ -16,8 +16,9 @@ HpglDoc fixLongPenUps(const HpglDoc &src, float thresholdUnits,
                       float stepUnits, float cutoffX);
 
 // Write doc as HPGL.  Single-point strokes become a pen-down touch.
+// Multi-point strokes are preceded by VS<vsValue>; (velocity select, 1–8).
 // Ends with PU; SP0; to park the pen.
-bool exportHpgl(const HpglDoc &doc, const std::string &path);
+bool exportHpgl(const HpglDoc &doc, const std::string &path, int vsValue = 1);
 
 struct DocStats {
   int   numPaths  = 0;

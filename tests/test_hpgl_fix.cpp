@@ -246,6 +246,148 @@ static void test_cutoff_boundary_inclusive() {
   REQUIRE(found);
 }
 
+// ── mergeCloseStrokes ────────────────────────────────────────────────────────
+
+static const float *uniformThresholds(float t) {
+  static float buf[10];
+  for (int i = 0; i < 10; ++i) buf[i] = t;
+  return buf;
+}
+
+static void test_merge_same_pen_within_threshold() {
+  // Gap of 10 units, threshold of 15 → strokes must be merged.
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {100.f, 0.f}}, 1});
+  doc.strokes.push_back(Stroke{{{110.f, 0.f}, {200.f, 0.f}}, 1});
+  HpglDoc out = mergeCloseStrokes(doc, uniformThresholds(15.f));
+  REQUIRE(out.strokes.size() == 1);
+}
+
+static void test_merge_same_pen_outside_threshold() {
+  // Gap of 10 units, threshold of 5 → strokes must NOT be merged.
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {100.f, 0.f}}, 1});
+  doc.strokes.push_back(Stroke{{{110.f, 0.f}, {200.f, 0.f}}, 1});
+  HpglDoc out = mergeCloseStrokes(doc, uniformThresholds(5.f));
+  REQUIRE(out.strokes.size() == 2);
+}
+
+static void test_merge_different_pens_not_merged() {
+  // Same gap, both pens within threshold, but different pen numbers → no merge.
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {100.f, 0.f}}, 1});
+  doc.strokes.push_back(Stroke{{{110.f, 0.f}, {200.f, 0.f}}, 2});
+  HpglDoc out = mergeCloseStrokes(doc, uniformThresholds(15.f));
+  REQUIRE(out.strokes.size() == 2);
+}
+
+static void test_merge_chain_three_strokes() {
+  // A→B and B→C both within threshold → all three merged into one stroke.
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {100.f, 0.f}}, 1});
+  doc.strokes.push_back(Stroke{{{110.f, 0.f}, {200.f, 0.f}}, 1});
+  doc.strokes.push_back(Stroke{{{210.f, 0.f}, {300.f, 0.f}}, 1});
+  HpglDoc out = mergeCloseStrokes(doc, uniformThresholds(15.f));
+  REQUIRE(out.strokes.size() == 1);
+}
+
+static void test_merge_preserves_all_points() {
+  // Merged stroke contains all points from both input strokes in order.
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {100.f, 0.f}}, 1});
+  doc.strokes.push_back(Stroke{{{110.f, 0.f}, {200.f, 0.f}}, 1});
+  HpglDoc out = mergeCloseStrokes(doc, uniformThresholds(15.f));
+  REQUIRE(out.strokes.size() == 1);
+  REQUIRE(out.strokes[0].points.size() == 4);
+  REQUIRE((out.strokes[0].points[0] == Vec2{  0.f, 0.f}));
+  REQUIRE((out.strokes[0].points[1] == Vec2{100.f, 0.f}));
+  REQUIRE((out.strokes[0].points[2] == Vec2{110.f, 0.f}));
+  REQUIRE((out.strokes[0].points[3] == Vec2{200.f, 0.f}));
+}
+
+static void test_merge_per_pen_threshold() {
+  // Pen 1 has a large threshold, pen 2 has zero → only pen-1 strokes merge.
+  static float buf[10] = {};
+  buf[0] = 50.f; // pen 1 (index 0)
+  buf[1] =  0.f; // pen 2 (index 1)
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {100.f, 0.f}}, 1});
+  doc.strokes.push_back(Stroke{{{110.f, 0.f}, {200.f, 0.f}}, 1}); // gap 10, pen 1 → merge
+  doc.strokes.push_back(Stroke{{{300.f, 0.f}, {400.f, 0.f}}, 2});
+  doc.strokes.push_back(Stroke{{{310.f, 0.f}, {500.f, 0.f}}, 2}); // gap 10, pen 2 → no merge
+  HpglDoc out = mergeCloseStrokes(doc, buf);
+  REQUIRE(out.strokes.size() == 3); // merged pen-1 pair + 2 separate pen-2 strokes
+}
+
+static void test_merge_empty_strokes_pass_through() {
+  // Empty strokes are not merged with neighbours and are preserved.
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {100.f, 0.f}}, 1});
+  doc.strokes.push_back(Stroke{{}, 1}); // empty
+  doc.strokes.push_back(Stroke{{{110.f, 0.f}, {200.f, 0.f}}, 1});
+  HpglDoc out = mergeCloseStrokes(doc, uniformThresholds(15.f));
+  // The empty stroke breaks the chain — strokes before and after it are separate.
+  REQUIRE(out.strokes.size() == 3);
+}
+
+static void test_merge_exact_threshold_distance_merges() {
+  // Distance exactly equals threshold (≤ comparison) → must merge.
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {100.f, 0.f}}, 1});
+  doc.strokes.push_back(Stroke{{{115.f, 0.f}, {200.f, 0.f}}, 1}); // gap = 15
+  HpglDoc out = mergeCloseStrokes(doc, uniformThresholds(15.f));
+  REQUIRE(out.strokes.size() == 1);
+}
+
+// ── exportHpgl VS velocity ────────────────────────────────────────────────────
+
+static void test_export_vs_emitted_before_pd_multipoint() {
+  // Multi-point stroke: VS<n>; must appear in the output.
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {100.f, 0.f}}, 1});
+  const std::string tmp = "/tmp/test_export_vs_multi.hpgl";
+  REQUIRE(exportHpgl(doc, tmp, 3));
+  std::string content = readFile(tmp);
+  REQUIRE(content.find("VS3;") != std::string::npos);
+  remove(tmp.c_str());
+}
+
+static void test_export_vs_not_emitted_for_dot() {
+  // Single-point (dot) stroke: VS<n>; must NOT appear.
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{50.f, 50.f}}, 1});
+  const std::string tmp = "/tmp/test_export_vs_dot.hpgl";
+  REQUIRE(exportHpgl(doc, tmp, 5));
+  std::string content = readFile(tmp);
+  REQUIRE(content.find("VS5;") == std::string::npos);
+  remove(tmp.c_str());
+}
+
+static void test_export_vs_default_is_1() {
+  // Default vsValue=1: multi-point stroke must get VS1;.
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {100.f, 0.f}}, 1});
+  const std::string tmp = "/tmp/test_export_vs_default.hpgl";
+  REQUIRE(exportHpgl(doc, tmp)); // no vsValue → defaults to 1
+  std::string content = readFile(tmp);
+  REQUIRE(content.find("VS1;") != std::string::npos);
+  remove(tmp.c_str());
+}
+
+static void test_export_vs_each_multipoint_stroke_gets_vs() {
+  // Two multi-point strokes → VS appears twice.
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {100.f, 0.f}}, 1});
+  doc.strokes.push_back(Stroke{{{200.f, 0.f}, {300.f, 0.f}}, 1});
+  const std::string tmp = "/tmp/test_export_vs_twice.hpgl";
+  REQUIRE(exportHpgl(doc, tmp, 2));
+  std::string content = readFile(tmp);
+  size_t first = content.find("VS2;");
+  REQUIRE(first != std::string::npos);
+  REQUIRE(content.find("VS2;", first + 1) != std::string::npos);
+  remove(tmp.c_str());
+}
+
 // ── exportHpgl edge cases ─────────────────────────────────────────────────────
 
 static void test_export_single_point_stroke_roundtrip() {
@@ -296,6 +438,19 @@ int main(int argc, char **argv) {
   run("cutoff boundary inclusive",            test_cutoff_boundary_inclusive);
   run("export single-point stroke roundtrip", test_export_single_point_stroke_roundtrip);
   run("export unwritable path returns false", test_export_unwritable_path_returns_false);
+
+  run("merge same pen within threshold",      test_merge_same_pen_within_threshold);
+  run("merge same pen outside threshold",     test_merge_same_pen_outside_threshold);
+  run("merge different pens not merged",      test_merge_different_pens_not_merged);
+  run("merge chain three strokes",            test_merge_chain_three_strokes);
+  run("merge preserves all points",           test_merge_preserves_all_points);
+  run("merge per-pen threshold",              test_merge_per_pen_threshold);
+  run("merge empty strokes pass through",     test_merge_empty_strokes_pass_through);
+  run("merge exact threshold distance",       test_merge_exact_threshold_distance_merges);
+  run("export VS emitted for multipoint",     test_export_vs_emitted_before_pd_multipoint);
+  run("export VS not emitted for dot",        test_export_vs_not_emitted_for_dot);
+  run("export VS default is 1",               test_export_vs_default_is_1);
+  run("export VS emitted per stroke",         test_export_vs_each_multipoint_stroke_gets_vs);
 
   printf("\n%d/%d passed\n", g_pass, g_pass + g_fail);
   return g_fail > 0 ? 1 : 0;

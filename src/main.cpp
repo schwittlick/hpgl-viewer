@@ -88,6 +88,7 @@ static int g_windowedW = 1400, g_windowedH = 900;
 static PenStyle g_pens[10];
 
 static std::string g_fixStatus;
+static int g_vsValue = 1; // velocity select for HPGL export (1–8)
 
 // ─── Layer helpers
 // ───────────────────────────────────────────────────────────
@@ -392,10 +393,22 @@ int main(int argc, char** argv) {
     bool activeHasFixed = g_activeLayer >= 0 &&
                           g_layers[g_activeLayer].hasFixed;
     ImGui::BeginDisabled(!activeHasFixed);
+    {
+      static const char *kVsLabels[] = {
+        "VS1","VS2","VS3","VS4","VS5","VS6","VS7","VS8"
+      };
+      ImGui::SetNextItemWidth(80);
+      if (ImGui::BeginCombo("Velocity", kVsLabels[g_vsValue - 1])) {
+        for (int i = 0; i < 8; ++i)
+          if (ImGui::Selectable(kVsLabels[i], g_vsValue == i + 1))
+            g_vsValue = i + 1;
+        ImGui::EndCombo();
+      }
+    }
     if (ImGui::Button("Export HPGL")) {
       Layer &al = g_layers[g_activeLayer];
       std::string out = fixedPath(al.path);
-      if (exportHpgl(al.doc, out)) {
+      if (exportHpgl(al.doc, out, g_vsValue)) {
         al.path = out;
         al.hasFixed = false;
         g_fixStatus = "Saved: " + out;
