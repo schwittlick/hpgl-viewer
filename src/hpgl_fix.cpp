@@ -91,12 +91,9 @@ bool exportHpgl(const HpglDoc &doc, const std::string &path, int vsValue) {
       fprintf(f, "PD;\n");
     } else {
       fprintf(f, "VS%d;\n", vsValue);
-      fprintf(f, "PD");
       for (size_t i = 1; i < stroke.points.size(); ++i) {
-        if (i > 1) fputc(',', f);
-        fprintf(f, "%.0f,%.0f", stroke.points[i].x, stroke.points[i].y);
+        fprintf(f, "PD%.0f,%.0f;\n", stroke.points[i].x, stroke.points[i].y);
       }
-      fprintf(f, ";\n");
     }
   }
   fprintf(f, "PU;\n");
