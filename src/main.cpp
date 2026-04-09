@@ -287,6 +287,12 @@ int main(int argc, char** argv) {
         std::string path = openFileDialog();
         if (!path.empty()) loadFile(path, /*replace=*/false);
       }
+      if (ImGui::IsKeyPressed(ImGuiKey_U)) {
+        g_layers.clear();
+        g_activeLayer = -1;
+        g_filePathBuf[0] = '\0';
+        rebuildPenUpRenderer();
+      }
     }
 
     // ── Top status bar ───────────────────────────────────────────────────
