@@ -98,9 +98,7 @@ static HpglDoc mergedDoc() {
   for (int li = 0; li < static_cast<int>(g_layers.size()); ++li) {
     const Layer &l = g_layers[li];
     if (!l.visible) continue;
-    int layerPen = (li % 8) + 1; // layer 0→pen1, layer 1→pen2, …
-    for (auto s : l.doc.strokes) {
-      s.pen = layerPen;
+    for (const auto &s : l.doc.strokes) {
       m.strokes.push_back(s);
     }
     if (!l.doc.empty()) {
