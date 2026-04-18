@@ -17,7 +17,7 @@ A lightweight HPGL file viewer built with Dear ImGui + OpenGL3 + GLFW.
 - Add multiple files as layers (`A` key or drag-and-drop additional files)
 - Pan (left-drag or middle-drag), zoom to cursor (scroll wheel), rotate 90° (`R`)
 - Fit-to-window (`C`), fullscreen (`F`)
-- Per-pen color (color picker) and line thickness (slider)
+- Per-pen color (color picker), line thickness (dropdown), and opacity (transparency slider)
 - Plotter coordinate tooltip on hover
 - Pen-up move visualisation: green = short, orange = long but outside zone, red = will be fixed
 - Pen-up smear fix: inserts pen-8 waypoint dots along long pen-up moves, exported as a separate `_fixed.hpgl` file

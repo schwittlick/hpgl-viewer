@@ -482,6 +482,9 @@ int main(int argc, char** argv) {
             g_pens[i].thickness = kPenWidths[j];
         ImGui::EndCombo();
       }
+      ImGui::SameLine();
+      ImGui::SetNextItemWidth(80);
+      ImGui::SliderFloat("##alpha", &g_pens[i].color.w, 0.0f, 1.0f, "A:%.2f");
       ImGui::PopID();
     }
 
