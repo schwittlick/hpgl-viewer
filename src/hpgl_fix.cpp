@@ -4,8 +4,7 @@
 #include <cstdio>
 
 
-HpglDoc fixLongPenUps(const HpglDoc &src, float thresholdUnits,
-                      float stepUnits, float cutoffX) {
+HpglDoc fixLongPenUps(const HpglDoc &src, float thresholdUnits, float stepUnits) {
   HpglDoc result;
   result.minX = src.minX; result.maxX = src.maxX;
   result.minY = src.minY; result.maxY = src.maxY;
@@ -21,7 +20,7 @@ HpglDoc fixLongPenUps(const HpglDoc &src, float thresholdUnits,
       float dy   = dst.y - prev.y;
       float dist = sqrtf(dx*dx + dy*dy);
 
-      if (dist > thresholdUnits && prev.x <= cutoffX) {
+      if (dist > thresholdUnits) {
         int steps = (int)(dist / stepUnits);
         for (int k = 1; k <= steps; ++k) {
           float t  = (float)k * stepUnits / dist;

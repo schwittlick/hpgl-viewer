@@ -45,7 +45,6 @@ struct PenUpRenderer {
   ImVec2 origin{};
   float  cW = 0, cH = 0;
   float  thresholdSq = 0;
-  float  cutoffX = 0;
   float  dispX = 0, dispY = 0, dispW = 1, dispH = 1;
   float  scale = 1.0f, cosR = 1.0f, sinR = 0.0f;
   float  panX  = 0.0f, panY = 0.0f;
@@ -54,7 +53,7 @@ struct PenUpRenderer {
   GLint uScale=-1, uCosR=-1, uSinR=-1, uPanX=-1, uPanY=-1;
   GLint uOriginX=-1, uOriginY=-1, uCanvasW=-1, uCanvasH=-1;
   GLint uDispX=-1, uDispY=-1, uDispW=-1, uDispH=-1;
-  GLint uThresholdSq=-1, uCutoffX=-1;
+  GLint uThresholdSq=-1;
 
   void init();
   void upload(const HpglDoc &doc);
@@ -101,7 +100,6 @@ struct DrawParams {
   float panX, panY, scale, rotation;
   bool  showPenUp;
   float penUpThreshold; // cm
-  float fixLeftPct;     // percent [0..100]
   const PenStyle *pens; // pointer to array of 8
   bool  showCoords = false;
 };

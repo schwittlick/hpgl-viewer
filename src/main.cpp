@@ -71,7 +71,6 @@ static bool  g_showPenUp = false;
 static bool  g_showCoords = true;
 static float g_penUpThreshold =  10.0f; // cm
 static float g_fixStepCm      =   2.0f; // cm between inserted waypoints
-static float g_fixLeftPct      =  15.0f; // % of doc width from left that is eligible
 
 // Framebuffer size (updated each frame)
 static int g_fbW = 0, g_fbH = 0;
@@ -186,11 +185,9 @@ static void applyFix() {
   if (g_activeLayer < 0 || g_activeLayer >= static_cast<int>(g_layers.size()))
     return;
   Layer &l = g_layers[g_activeLayer];
-  float cutoff = l.doc.minX + (g_fixLeftPct / 100.0f) * (l.doc.maxX - l.doc.minX);
   l.doc = fixLongPenUps(l.doc,
                         g_penUpThreshold * kHpglUnitsPerCm,
-                        g_fixStepCm      * kHpglUnitsPerCm,
-                        cutoff);
+                        g_fixStepCm      * kHpglUnitsPerCm);
   l.hasFixed = true;
   rebuildPenUpRenderer();
   refreshDocStats();
@@ -445,8 +442,6 @@ int main(int argc, char** argv) {
     ImGui::SliderFloat("Threshold", &g_penUpThreshold, 1.0f, 200.0f, "%.0f cm");
     ImGui::SetNextItemWidth(150);
     ImGui::SliderFloat("Waypoint spacing", &g_fixStepCm, 0.5f, 20.0f, "%.1f cm");
-    ImGui::SetNextItemWidth(150);
-    ImGui::SliderFloat("Left zone", &g_fixLeftPct, 0.0f, 100.0f, "%.0f%%");
     if (!g_fixStatus.empty())
       ImGui::TextWrapped("%s", g_fixStatus.c_str());
 
@@ -554,7 +549,7 @@ int main(int argc, char** argv) {
     g_penUpRenderer.fbH  = g_fbH;
     g_strokeRenderer.fbH = g_fbH;
     DrawParams dp{g_panX, g_panY, g_scale, g_rotation,
-                  g_showPenUp, g_penUpThreshold, g_fixLeftPct, g_pens,
+                  g_showPenUp, g_penUpThreshold, g_pens,
                   g_showCoords};
     drawHpgl(dl, canvasPos, cW, cH, g_mergedDoc, dp,
              g_penUpRenderer, g_strokeRenderer);

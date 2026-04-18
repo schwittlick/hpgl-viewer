@@ -10,10 +10,8 @@ inline constexpr int   kWaypointPen    = 8;
 
 // For every inter-stroke pen-up move whose Euclidean length exceeds
 // thresholdUnits, insert single-point pen-down stops (pen kWaypointPen) spaced
-// stepUnits apart along the direct path.  Only moves whose start X is
-// within cutoffX are considered.
-HpglDoc fixLongPenUps(const HpglDoc &src, float thresholdUnits,
-                      float stepUnits, float cutoffX);
+// stepUnits apart along the direct path.
+HpglDoc fixLongPenUps(const HpglDoc &src, float thresholdUnits, float stepUnits);
 
 // Write doc as HPGL.  Single-point strokes become a pen-down touch.
 // Multi-point strokes are preceded by VS<vsValue>; (velocity select, 1–8).

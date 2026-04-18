@@ -116,18 +116,12 @@ void main() {
 static const char *kPenUpFragSrc = R"glsl(
 #version 330 core
 in float vLenSq;
-in float vStartX;
 uniform float uThresholdSq;
-uniform float uCutoffX;   // HPGL X cutoff (left-zone boundary)
 out vec4 fragColor;
 
 void main() {
-    bool isLong = vLenSq  > uThresholdSq;
-    bool inZone = vStartX <= uCutoffX;
-    if (isLong && inZone)
+    if (vLenSq > uThresholdSq)
         fragColor = vec4(220.0/255.0,  50.0/255.0,  50.0/255.0, 200.0/255.0); // red: will fix
-    else if (isLong)
-        fragColor = vec4(220.0/255.0, 150.0/255.0,  50.0/255.0, 180.0/255.0); // orange: long, skipped
     else
         fragColor = vec4( 60.0/255.0, 220.0/255.0, 100.0/255.0, 160.0/255.0); // green: short
 }
