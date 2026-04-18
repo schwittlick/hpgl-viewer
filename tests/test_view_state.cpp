@@ -58,21 +58,22 @@ static void test_tall_doc_constrained_by_height() {
 static void test_doc_at_origin_centered_in_canvas() {
   // doc 0–100 x 0–100, canvas 200×200, scale=1.8
   // panX = 100 - (0 + 50)*1.8 = 100 - 90 = 10
-  // panY = 100 - (0 + 50)*1.8 = 100 - 90 = 10
+  // panY = 100 + (0 + 50)*1.8 = 100 + 90 = 190
   HpglDoc doc = makeDoc(0, 0, 100, 100);
   ViewState vs = fitToCanvas(200.f, 200.f, doc, 0.f);
   REQUIRE(nearlyEqual(vs.panX, 10.f));
-  REQUIRE(nearlyEqual(vs.panY, 10.f));
+  REQUIRE(nearlyEqual(vs.panY, 190.f));
 }
 
 static void test_doc_offset_from_origin() {
   // doc 100–200 x 0–100, canvas 200×200
   // scale = 1.8, docW = 100, mid = 150
   // panX = 100 - 150 * 1.8 = 100 - 270 = -170
+  // panY = 100 + 50 * 1.8 = 100 + 90 = 190
   HpglDoc doc = makeDoc(100, 0, 200, 100);
   ViewState vs = fitToCanvas(200.f, 200.f, doc, 0.f);
   REQUIRE(nearlyEqual(vs.panX, -170.f));
-  REQUIRE(nearlyEqual(vs.panY,   10.f));
+  REQUIRE(nearlyEqual(vs.panY,  190.f));
 }
 
 // ── Rotation ─────────────────────────────────────────────────────────────────

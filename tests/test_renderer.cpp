@@ -62,11 +62,13 @@ static void test_unrotate_is_self_inverse_at_0() {
 // ── xfPoint ───────────────────────────────────────────────────────────────────
 
 static void test_xf_center_hpgl_maps_to_canvas_center() {
-  // doc 0–100 x 0–100, scale=1.8, pan computed by fitToCanvas (10,10),
+  // doc 0–100 x 0–100, scale=1.8, pan computed by fitToCanvas (10, 190),
   // no rotation, origin at (0,0), canvas 200×200.
   // HPGL centre (50,50) should map to canvas centre (100,100).
+  // sx = 50*1.8 + 10 - 100 = 0 → screen_x = 0 + 100 = 100
+  // sy = -50*1.8 + 190 - 100 = 0 → screen_y = 0 + 100 = 100
   ImVec2 origin{0.f, 0.f};
-  REQUIRE(nearVec(xfPoint(50.f, 50.f, origin, 10.f, 10.f, 1.8f,
+  REQUIRE(nearVec(xfPoint(50.f, 50.f, origin, 10.f, 190.f, 1.8f,
                           200.f, 200.f, 1.f, 0.f),
                   {100.f, 100.f}));
 }
@@ -74,8 +76,8 @@ static void test_xf_center_hpgl_maps_to_canvas_center() {
 static void test_xf_scale_doubles_distance_from_center() {
   // With scale=2 and pan chosen so HPGL origin → canvas origin,
   // a point 10 HPGL units to the right should be 20 px to the right.
-  // panX = cW*0.5 - 0 = 100, panY = cH*0.5 - 0 = 100 (HPGL origin at canvas centre)
-  // xfPoint(10,0) → sx = 10*2+100-100=20, sy=0+100-100=0 → (0+20+100, 0+0+100)=(120,100)
+  // panX = cW*0.5 = 100, panY = cH*0.5 = 100 (HPGL origin at canvas centre)
+  // xfPoint(10,0) → sx = 10*2+100-100=20, sy = -0*2+100-100=0 → (120,100)
   ImVec2 origin{0.f, 0.f};
   ImVec2 a = xfPoint( 0.f, 0.f, origin, 100.f, 100.f, 2.f, 200.f, 200.f, 1.f, 0.f);
   ImVec2 b = xfPoint(10.f, 0.f, origin, 100.f, 100.f, 2.f, 200.f, 200.f, 1.f, 0.f);
@@ -110,7 +112,7 @@ static void run_roundtrip(float hx, float hy,
   ImVec2 unrot = unrotateCanvas(mx, my, cW, cH, cosR, sinR);
 
   float recovered_x = (unrot.x - panX) / scale;
-  float recovered_y = (unrot.y - panY) / scale;
+  float recovered_y = (panY - unrot.y) / scale;
 
   REQUIRE(near(recovered_x, hx));
   REQUIRE(near(recovered_y, hy));

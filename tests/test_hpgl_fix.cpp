@@ -15,8 +15,8 @@ static void test_waypoints_use_pen8() {
   doc.strokes.push_back(Stroke{{{0.f, 0.f}, {10.f, 0.f}}, 1});
   doc.strokes.push_back(Stroke{{{2000.f, 0.f}, {2010.f, 0.f}}, 1});
 
-  // threshold=400 units (10 cm), step=400 units, cutoff=maxX
-  HpglDoc fixed = fixLongPenUps(doc, 400.f, 400.f, doc.maxX);
+  // threshold=400 units (10 cm), step=400 units
+  HpglDoc fixed = fixLongPenUps(doc, 400.f, 400.f);
 
   bool found_pen8 = false;
   for (auto &s : fixed.strokes)
@@ -38,24 +38,25 @@ static void test_no_waypoints_below_threshold() {
   doc.strokes.push_back(Stroke{{{100.f, 0.f}, {110.f, 0.f}}, 1});
 
   // threshold=800 units (20 cm) — the 100-unit gap is well below
-  HpglDoc fixed = fixLongPenUps(doc, 800.f, 400.f, doc.maxX);
+  HpglDoc fixed = fixLongPenUps(doc, 800.f, 400.f);
 
   for (auto &s : fixed.strokes)
     REQUIRE(s.pen != 8);
 }
 
-static void test_waypoints_outside_cutoff_not_inserted() {
+static void test_waypoints_inserted_for_long_gap() {
   HpglDoc doc;
   doc.minX = 0; doc.maxX = 5000; doc.minY = 0; doc.maxY = 0;
   doc.strokes.push_back(Stroke{{{4000.f, 0.f}, {4010.f, 0.f}}, 1});
   doc.strokes.push_back(Stroke{{{4900.f, 0.f}, {4910.f, 0.f}}, 1});
 
-  // cutoff = 10% = 500 units; both strokes start way past that
-  float cutoff = doc.minX + 0.1f * (doc.maxX - doc.minX);
-  HpglDoc fixed = fixLongPenUps(doc, 400.f, 400.f, cutoff);
+  // gap = 890 units > threshold 400 → waypoints inserted
+  HpglDoc fixed = fixLongPenUps(doc, 400.f, 400.f);
 
+  bool found_pen8 = false;
   for (auto &s : fixed.strokes)
-    REQUIRE(s.pen != 8);
+    if (s.pen == 8) found_pen8 = true;
+  REQUIRE(found_pen8);
 }
 
 // exportHpgl: file must end with PU;\nSP0;\n
@@ -96,11 +97,10 @@ static void test_fix_data_file_has_pen8_and_sp0() {
   HpglDoc doc = HpglParser{}.parseFile(inPath);
   REQUIRE(!doc.empty());
 
-  // threshold=10 cm, step=2 cm, cutoff=100% of width
+  // threshold=10 cm, step=2 cm
   float threshold = 10.f * kHpglUnitsPerCm;
   float step      =  2.f * kHpglUnitsPerCm;
-  float cutoff    = doc.maxX;
-  HpglDoc fixed   = fixLongPenUps(doc, threshold, step, cutoff);
+  HpglDoc fixed   = fixLongPenUps(doc, threshold, step);
 
   // Must have inserted at least one pen-8 waypoint
   bool found_pen8 = false;
@@ -208,7 +208,7 @@ static void test_single_stroke_doc_returned_unchanged() {
   HpglDoc doc;
   doc.minX = 0; doc.maxX = 100; doc.minY = 0; doc.maxY = 0;
   doc.strokes.push_back(Stroke{{{0.f, 0.f}, {100.f, 0.f}}, 1});
-  HpglDoc fixed = fixLongPenUps(doc, 400.f, 400.f, doc.maxX);
+  HpglDoc fixed = fixLongPenUps(doc, 400.f, 400.f);
   REQUIRE(fixed.strokes.size() == 1);
   for (auto &s : fixed.strokes) REQUIRE(s.pen != kWaypointPen);
 }
@@ -219,7 +219,7 @@ static void test_step_larger_than_dist_inserts_no_waypoints() {
   doc.minX = 0; doc.maxX = 800; doc.minY = 0; doc.maxY = 0;
   doc.strokes.push_back(Stroke{{{0.f, 0.f}}, 1});
   doc.strokes.push_back(Stroke{{{800.f, 0.f}}, 1});
-  HpglDoc fixed = fixLongPenUps(doc, 400.f, 1000.f, doc.maxX);
+  HpglDoc fixed = fixLongPenUps(doc, 400.f, 1000.f);
   for (auto &s : fixed.strokes) REQUIRE(s.pen != kWaypointPen);
 }
 
@@ -229,18 +229,17 @@ static void test_threshold_boundary_equal_does_not_insert() {
   doc.minX = 0; doc.maxX = 400; doc.minY = 0; doc.maxY = 0;
   doc.strokes.push_back(Stroke{{{0.f, 0.f}}, 1});
   doc.strokes.push_back(Stroke{{{400.f, 0.f}}, 1});
-  HpglDoc fixed = fixLongPenUps(doc, 400.f, 100.f, doc.maxX);
+  HpglDoc fixed = fixLongPenUps(doc, 400.f, 100.f);
   for (auto &s : fixed.strokes) REQUIRE(s.pen != kWaypointPen);
 }
 
-static void test_cutoff_boundary_inclusive() {
-  // prev.x == cutoffX: the guard is <=, so waypoints ARE inserted.
+static void test_long_gap_inserts_waypoints() {
+  // gap = 1000 > threshold 400 → waypoints inserted.
   HpglDoc doc;
   doc.minX = 0; doc.maxX = 1000; doc.minY = 0; doc.maxY = 0;
   doc.strokes.push_back(Stroke{{{500.f, 0.f}}, 1});
-  doc.strokes.push_back(Stroke{{{1500.f, 0.f}}, 1}); // gap = 1000 > threshold
-  float cutoff = 500.f; // exactly at prev.x
-  HpglDoc fixed = fixLongPenUps(doc, 400.f, 400.f, cutoff);
+  doc.strokes.push_back(Stroke{{{1500.f, 0.f}}, 1});
+  HpglDoc fixed = fixLongPenUps(doc, 400.f, 400.f);
   bool found = false;
   for (auto &s : fixed.strokes) if (s.pen == kWaypointPen) found = true;
   REQUIRE(found);
@@ -419,7 +418,7 @@ int main(int argc, char **argv) {
 
   run("waypoints use pen 8",                  test_waypoints_use_pen8);
   run("no waypoints below threshold",         test_no_waypoints_below_threshold);
-  run("waypoints outside cutoff not inserted",test_waypoints_outside_cutoff_not_inserted);
+  run("waypoints inserted for long gap",       test_waypoints_inserted_for_long_gap);
   run("export ends with SP0",                 test_export_ends_with_sp0);
   run("export roundtrip preserves strokes",   test_export_roundtrip_preserves_strokes);
   run("fix data file has pen8 and SP0",       test_fix_data_file_has_pen8_and_sp0);
@@ -435,7 +434,7 @@ int main(int argc, char **argv) {
   run("single-stroke doc unchanged by fix",   test_single_stroke_doc_returned_unchanged);
   run("step > dist inserts no waypoints",     test_step_larger_than_dist_inserts_no_waypoints);
   run("threshold boundary equal: no insert",  test_threshold_boundary_equal_does_not_insert);
-  run("cutoff boundary inclusive",            test_cutoff_boundary_inclusive);
+  run("long gap inserts waypoints",           test_long_gap_inserts_waypoints);
   run("export single-point stroke roundtrip", test_export_single_point_stroke_roundtrip);
   run("export unwritable path returns false", test_export_unwritable_path_returns_false);
 

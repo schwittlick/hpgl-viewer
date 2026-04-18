@@ -213,7 +213,6 @@ void PenUpRenderer::init() {
   uDispW       = glGetUniformLocation(program, "uDispW");
   uDispH       = glGetUniformLocation(program, "uDispH");
   uThresholdSq = glGetUniformLocation(program, "uThresholdSq");
-  uCutoffX     = glGetUniformLocation(program, "uCutoffX");
 
   glGenVertexArrays(1, &vao);
   glGenBuffers(1, &vbo);
@@ -272,7 +271,6 @@ void PenUpRenderer::draw() const {
   glUniform1f(uDispW,       dispW);
   glUniform1f(uDispH,       dispH);
   glUniform1f(uThresholdSq, thresholdSq);
-  glUniform1f(uCutoffX,     cutoffX);
   glBindVertexArray(vao);
   glDrawArrays(GL_LINES, 0, vertexCount);
   glBindVertexArray(0);
@@ -605,14 +603,12 @@ void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW, float canvasH,
   // Pen-up moves — drawn via GPU VBO (one draw call for all segments)
   if (p.showPenUp && penUpRenderer.valid && penUpRenderer.vertexCount > 0) {
     float t  = p.penUpThreshold * kHpglUnitsPerCm;
-    float cx = doc.minX + (p.fixLeftPct / 100.0f) * (doc.maxX - doc.minX);
     ImVec2 dp = ImGui::GetMainViewport()->Pos;
     ImVec2 ds = ImGui::GetIO().DisplaySize;
     penUpRenderer.origin      = origin;
     penUpRenderer.cW          = canvasW;
     penUpRenderer.cH          = canvasH;
     penUpRenderer.thresholdSq = t * t;
-    penUpRenderer.cutoffX     = cx;
     penUpRenderer.dispX       = dp.x;
     penUpRenderer.dispY       = dp.y;
     penUpRenderer.dispW       = ds.x;
@@ -624,13 +620,6 @@ void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW, float canvasH,
     penUpRenderer.panY        = p.panY;
     dl->AddCallback(penUpRenderCallback, &penUpRenderer);
     dl->AddCallback(ImDrawCallback_ResetRenderState, nullptr);
-
-    // Draw vertical cutoff line in HPGL space
-    ImVec2 lineTop = xfPoint(cx, doc.minY, origin,
-                             p.panX, p.panY, p.scale, canvasW, canvasH, cosR, sinR);
-    ImVec2 lineBot = xfPoint(cx, doc.maxY, origin,
-                             p.panX, p.panY, p.scale, canvasW, canvasH, cosR, sinR);
-    dl->AddLine(lineTop, lineBot, IM_COL32(100, 200, 255, 200), 1.5f);
   }
 
   dl->PopClipRect();
