@@ -38,6 +38,7 @@ A lightweight HPGL file viewer built with Dear ImGui + OpenGL3 + GLFW.
 | `C` | Fit to window |
 | `R` | Rotate 90° |
 | `E` | Apply pen-up fix (preview in viewport, use Export to save) |
+| `U` | Unload all files / reset to empty state |
 
 ## Build
 
