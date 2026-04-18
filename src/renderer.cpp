@@ -582,7 +582,7 @@ void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW, float canvasH,
       float lx = (cx - canvasW * 0.5f) * cosR + (cy - canvasH * 0.5f) * sinR;
       float ly = -(cx - canvasW * 0.5f) * sinR + (cy - canvasH * 0.5f) * cosR;
       float hx = (lx - p.panX + canvasW * 0.5f) / p.scale;
-      float hy = (ly - p.panY + canvasH * 0.5f) / p.scale;
+      float hy = (p.panY - canvasH * 0.5f - ly) / p.scale;
       visMinX = std::min(visMinX, hx); visMinY = std::min(visMinY, hy);
       visMaxX = std::max(visMaxX, hx); visMaxY = std::max(visMaxY, hy);
     }
