@@ -31,7 +31,7 @@ void main() {
     vStartX = aStartX;
     // HPGL → rotated screen space (matches xfPoint() in CPU code)
     float lx = aPos.x * uScale + uPanX - uCanvasW * 0.5;
-    float ly = aPos.y * uScale + uPanY - uCanvasH * 0.5;
+    float ly = -aPos.y * uScale + uPanY - uCanvasH * 0.5;
     float sx = uOriginX + lx * uCosR - ly * uSinR + uCanvasW * 0.5;
     float sy = uOriginY + lx * uSinR + ly * uCosR + uCanvasH * 0.5;
     // screen → NDC using ImGui's projection (DisplayPos / DisplaySize)
@@ -66,7 +66,7 @@ out float vV;
 
 vec2 toScreen(vec2 p) {
     float lx = p.x * uScale + uPanX - uCanvasW * 0.5;
-    float ly = p.y * uScale + uPanY - uCanvasH * 0.5;
+    float ly = -p.y * uScale + uPanY - uCanvasH * 0.5;
     return vec2(uOriginX + lx * uCosR - ly * uSinR + uCanvasW * 0.5,
                 uOriginY + lx * uSinR + ly * uCosR + uCanvasH * 0.5);
 }
@@ -166,7 +166,7 @@ ImVec2 xfPoint(float hx, float hy, ImVec2 origin,
                float panX, float panY, float scale,
                float cW, float cH, float cosR, float sinR) {
   float sx = hx * scale + panX - cW * 0.5f;
-  float sy = hy * scale + panY - cH * 0.5f;
+  float sy = -hy * scale + panY - cH * 0.5f;
   return {origin.x + sx * cosR - sy * sinR + cW * 0.5f,
           origin.y + sx * sinR + sy * cosR + cH * 0.5f};
 }
@@ -480,9 +480,9 @@ static void drawCoordinateSystem(ImDrawList *dl, ImVec2 origin,
   float visW = cW * invScale;
   float visH = cH * invScale;
   float hMinX = (-p.panX) * invScale;
-  float hMinY = (-p.panY) * invScale;
+  float hMaxY = p.panY * invScale;
   float hMaxX = hMinX + visW;
-  float hMaxY = hMinY + visH;
+  float hMinY = hMaxY - visH;
 
   float stepX = pickGridStep(visW);
   float stepY = pickGridStep(visH);
@@ -508,8 +508,8 @@ static void drawCoordinateSystem(ImDrawList *dl, ImVec2 origin,
     if (fabsf(mm) < 0.01f) snprintf(buf, sizeof(buf), "0");
     else if (fabsf(mm) >= 10.f) snprintf(buf, sizeof(buf), "%.0fcm", mm / 10.f);
     else snprintf(buf, sizeof(buf), "%.0fmm", mm);
-    // Place label near the bottom of the canvas (unrotated: just above bottom edge)
-    ImVec2 lp = xfPoint(x, hMinY + visH * 0.97f, origin, p.panX, p.panY,
+    // Place label near the bottom of the canvas (low HPGL-Y = screen bottom)
+    ImVec2 lp = xfPoint(x, hMinY + visH * 0.03f, origin, p.panX, p.panY,
                         p.scale, cW, cH, cosR, sinR);
     dl->AddText(lp, labelCol, buf);
   }

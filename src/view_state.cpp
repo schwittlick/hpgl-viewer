@@ -22,6 +22,6 @@ ViewState fitToCanvas(float canvasW, float canvasH, const HpglDoc &doc,
   ViewState vs;
   vs.scale = std::min(canvasW / effW, canvasH / effH) * (1.0f - 2.0f * pad);
   vs.panX  = canvasW * 0.5f - (doc.minX + docW * 0.5f) * vs.scale;
-  vs.panY  = canvasH * 0.5f - (doc.minY + docH * 0.5f) * vs.scale;
+  vs.panY  = canvasH * 0.5f + (doc.minY + docH * 0.5f) * vs.scale;
   return vs;
 }

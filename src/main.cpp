@@ -593,7 +593,7 @@ int main(int argc, char** argv) {
       auto [rx, ry] = unrotateCanvas(mx, my, cW, cH, cosR, sinR);
       ImGui::SetTooltip("%.0f, %.0f",
                         (rx - g_panX) / g_scale,
-                        (ry - g_panY) / g_scale);
+                        (g_panY - ry) / g_scale);
     }
 
     ImGui::End();

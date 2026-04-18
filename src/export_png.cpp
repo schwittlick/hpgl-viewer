@@ -111,7 +111,7 @@ bool exportPng(const HpglDoc &doc, const PenStyle pens[10],
   float scale = static_cast<float>(widthPx) / docW * (1.f - 2.f * margin);
 
   float panX = widthPx  * margin - doc.minX * scale;
-  float panY = heightPx * margin - doc.minY * scale;
+  float panY = heightPx * (1.f - margin) + doc.minY * scale;
 
   // RGBA pixel buffer — white background
   std::vector<uint8_t> pixels((size_t)widthPx * heightPx * 4, 0xFF);
@@ -131,7 +131,7 @@ bool exportPng(const HpglDoc &doc, const PenStyle pens[10],
         roundf(pens[pi].thickness * scale * kHpglUnitsPerMm * 0.5f)));
 
     auto toScreen = [&](const Vec2 &v) -> std::pair<float, float> {
-      return {v.x * scale + panX, v.y * scale + panY};
+      return {v.x * scale + panX, -v.y * scale + panY};
     };
 
     // Single-point / dot stroke
