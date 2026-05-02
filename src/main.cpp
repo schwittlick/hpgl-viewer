@@ -71,6 +71,7 @@ static bool  g_showPenUp = false;
 static bool  g_showCoords = true;
 static float g_penUpThreshold =  10.0f; // cm
 static float g_fixStepCm      =   2.0f; // cm between inserted waypoints
+static float g_splitMaxLenCm  =   2.0f; // cm — max pen-down length per stroke
 
 // Framebuffer size (updated each frame)
 static int g_fbW = 0, g_fbH = 0;
@@ -205,6 +206,17 @@ static void applyMerge() {
   rebuildPenUpRenderer();
   refreshDocStats();
   g_fixStatus = "Merged (not yet saved)";
+}
+
+static void applySplit() {
+  if (g_activeLayer < 0 || g_activeLayer >= static_cast<int>(g_layers.size()))
+    return;
+  Layer &l = g_layers[g_activeLayer];
+  l.doc = splitLongStrokes(l.doc, g_splitMaxLenCm * kHpglUnitsPerCm);
+  l.hasFixed = true;
+  rebuildPenUpRenderer();
+  refreshDocStats();
+  g_fixStatus = "Split (not yet saved)";
 }
 
 // ─── Main
@@ -391,6 +403,8 @@ int main(int argc, char** argv) {
       applyFix();
     if (ImGui::Button("Merge close strokes"))
       applyMerge();
+    if (ImGui::Button("Split long strokes"))
+      applySplit();
     bool activeHasFixed = g_activeLayer >= 0 &&
                           g_layers[g_activeLayer].hasFixed;
     ImGui::BeginDisabled(!activeHasFixed);
@@ -440,6 +454,8 @@ int main(int argc, char** argv) {
     ImGui::SliderFloat("Threshold", &g_penUpThreshold, 1.0f, 200.0f, "%.0f cm");
     ImGui::SetNextItemWidth(150);
     ImGui::SliderFloat("Waypoint spacing", &g_fixStepCm, 0.5f, 20.0f, "%.1f cm");
+    ImGui::SetNextItemWidth(150);
+    ImGui::SliderFloat("Max stroke length", &g_splitMaxLenCm, 0.1f, 20.0f, "%.1f cm");
     if (!g_fixStatus.empty())
       ImGui::TextWrapped("%s", g_fixStatus.c_str());
 

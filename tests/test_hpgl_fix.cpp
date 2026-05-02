@@ -338,6 +338,139 @@ static void test_merge_exact_threshold_distance_merges() {
   REQUIRE(out.strokes.size() == 1);
 }
 
+// ── splitLongStrokes ─────────────────────────────────────────────────────────
+
+static void test_split_short_stroke_unchanged() {
+  // Stroke length 100 < max 400 → unchanged.
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {100.f, 0.f}}, 1});
+  HpglDoc out = splitLongStrokes(doc, 400.f);
+  REQUIRE(out.strokes.size() == 1);
+  REQUIRE(out.strokes[0].points.size() == 2);
+}
+
+static void test_split_one_segment_above_max() {
+  // Single segment of 1000 units, max = 400 → 1000/400 = 2.5 → 3 fragments.
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {1000.f, 0.f}}, 1});
+  HpglDoc out = splitLongStrokes(doc, 400.f);
+  REQUIRE(out.strokes.size() == 3);
+  // Each fragment must start where the previous one ended.
+  REQUIRE((out.strokes[0].points.back() == out.strokes[1].points.front()));
+  REQUIRE((out.strokes[1].points.back() == out.strokes[2].points.front()));
+  // First fragment is exactly maxLength long
+  REQUIRE((out.strokes[0].points.front() == Vec2{0.f, 0.f}));
+  REQUIRE((out.strokes[0].points.back()  == Vec2{400.f, 0.f}));
+  // Last fragment ends at the original endpoint
+  REQUIRE((out.strokes[2].points.back()  == Vec2{1000.f, 0.f}));
+}
+
+static void test_split_preserves_pen() {
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {1000.f, 0.f}}, 5});
+  HpglDoc out = splitLongStrokes(doc, 400.f);
+  for (auto &s : out.strokes) REQUIRE(s.pen == 5);
+}
+
+static void test_split_exact_multiple_no_extra_fragment() {
+  // 800 units, max 400 → exactly 2 equal fragments, no trailing single point.
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {800.f, 0.f}}, 1});
+  HpglDoc out = splitLongStrokes(doc, 400.f);
+  REQUIRE(out.strokes.size() == 2);
+  REQUIRE((out.strokes[0].points.back()  == Vec2{400.f, 0.f}));
+  REQUIRE((out.strokes[1].points.front() == Vec2{400.f, 0.f}));
+  REQUIRE((out.strokes[1].points.back()  == Vec2{800.f, 0.f}));
+}
+
+static void test_split_polyline_accumulates_across_segments() {
+  // Polyline of 4 segments × 100 units = 400 total; max = 250.
+  // Expected: split mid-segment after 250 units cumulative.
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{
+    {0.f, 0.f}, {100.f, 0.f}, {200.f, 0.f}, {300.f, 0.f}, {400.f, 0.f}
+  }, 1});
+  HpglDoc out = splitLongStrokes(doc, 250.f);
+  REQUIRE(out.strokes.size() == 2);
+  REQUIRE((out.strokes[0].points.back()  == Vec2{250.f, 0.f}));
+  REQUIRE((out.strokes[1].points.front() == Vec2{250.f, 0.f}));
+  REQUIRE((out.strokes[1].points.back()  == Vec2{400.f, 0.f}));
+}
+
+static void test_split_zero_max_is_noop() {
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {1000.f, 0.f}}, 1});
+  HpglDoc out = splitLongStrokes(doc, 0.f);
+  REQUIRE(out.strokes.size() == 1);
+  REQUIRE(out.strokes[0].points.size() == 2);
+}
+
+static void test_split_single_point_passes_through() {
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{50.f, 50.f}}, 1});
+  HpglDoc out = splitLongStrokes(doc, 400.f);
+  REQUIRE(out.strokes.size() == 1);
+  REQUIRE(out.strokes[0].points.size() == 1);
+}
+
+static void test_split_waypoint_pen_passes_through() {
+  // Pen-8 dot strokes from fixLongPenUps must not be split.
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {0.f, 0.f}}, kWaypointPen});
+  HpglDoc out = splitLongStrokes(doc, 400.f);
+  REQUIRE(out.strokes.size() == 1);
+  REQUIRE(out.strokes[0].pen == kWaypointPen);
+}
+
+static void test_split_export_roundtrip_creates_pen_up_commands() {
+  // The whole point of the feature: each split fragment must round-trip through
+  // export as its own PU…PD sequence, i.e. the plotter physically lifts the pen.
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {1000.f, 0.f}}, 1});
+
+  HpglDoc split = splitLongStrokes(doc, 400.f);
+  REQUIRE(split.strokes.size() == 3);
+
+  const std::string tmp = "/tmp/test_split_roundtrip.hpgl";
+  REQUIRE(exportHpgl(split, tmp));
+
+  // Count PU occurrences.  The first fragment uses PU<x>,<y>; (1 PU).  Each
+  // of the 2 inter-fragment lifts uses PU<x+1>,<y>;PU<x>,<y>; (2 PUs each).
+  // Final park adds 1.  Total: 1 + 2*2 + 1 = 6.
+  std::string content = readFile(tmp);
+  int pu_count = 0;
+  for (size_t i = 0; (i = content.find("PU", i)) != std::string::npos; ++i)
+    ++pu_count;
+  REQUIRE(pu_count == 6);
+
+  // Each inter-fragment lift must be "PU<x+1>,<y>;PU<x>,<y>;" — move 1 unit
+  // away then return (pen still up) so the plotter registers a physical lift.
+  // Two such lifts expected (between 3 fragments).
+  // First split lands at (400,0) → expect PU401,0;PU400,0;
+  REQUIRE(content.find("PU401,0;PU400,0;") != std::string::npos);
+  // Second split lands at (800,0) → expect PU801,0;PU800,0;
+  REQUIRE(content.find("PU801,0;PU800,0;") != std::string::npos);
+  REQUIRE(content.find("PU;\nSP0;\n") != std::string::npos);
+
+  // Re-parse: each fragment must come back as a distinct stroke with two points.
+  HpglDoc reloaded = HpglParser{}.parseFile(tmp);
+  REQUIRE(reloaded.strokes.size() == 3);
+  for (auto &s : reloaded.strokes) REQUIRE(s.points.size() == 2);
+  remove(tmp.c_str());
+}
+
+static void test_split_bbox_populated() {
+  // Fragments must have a finite bbox so renderer culling works correctly.
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {1000.f, 0.f}}, 1});
+  HpglDoc out = splitLongStrokes(doc, 400.f);
+  for (auto &s : out.strokes) {
+    REQUIRE(s.bboxMin.x <= s.bboxMax.x);
+    REQUIRE(s.bboxMin.y <= s.bboxMax.y);
+    REQUIRE(s.bboxMin.x < 1e29f); // not the sentinel default
+  }
+}
+
 // ── exportHpgl VS velocity ────────────────────────────────────────────────────
 
 static void test_export_vs_emitted_before_pd_multipoint() {
@@ -446,6 +579,17 @@ int main(int argc, char **argv) {
   run("merge per-pen threshold",              test_merge_per_pen_threshold);
   run("merge empty strokes pass through",     test_merge_empty_strokes_pass_through);
   run("merge exact threshold distance",       test_merge_exact_threshold_distance_merges);
+  run("split: short stroke unchanged",        test_split_short_stroke_unchanged);
+  run("split: one segment above max",         test_split_one_segment_above_max);
+  run("split: preserves pen",                 test_split_preserves_pen);
+  run("split: exact multiple no extra frag",  test_split_exact_multiple_no_extra_fragment);
+  run("split: polyline accumulates",          test_split_polyline_accumulates_across_segments);
+  run("split: zero max is no-op",             test_split_zero_max_is_noop);
+  run("split: single point passes through",   test_split_single_point_passes_through);
+  run("split: waypoint pen passes through",   test_split_waypoint_pen_passes_through);
+  run("split: bbox populated",                test_split_bbox_populated);
+  run("split: export roundtrip yields PUs",   test_split_export_roundtrip_creates_pen_up_commands);
+
   run("export VS emitted for multipoint",     test_export_vs_emitted_before_pd_multipoint);
   run("export VS not emitted for dot",        test_export_vs_not_emitted_for_dot);
   run("export VS default is 1",               test_export_vs_default_is_1);

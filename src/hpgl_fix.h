@@ -34,6 +34,13 @@ DocStats computeDocStats(const HpglDoc &doc);
 // consecutive gap is within threshold.
 HpglDoc mergeCloseStrokes(const HpglDoc &src, const float thresholdsUnits[10]);
 
+// Split strokes whose pen-down polyline length exceeds maxLengthUnits into
+// shorter consecutive strokes.  Each split inserts a coincident pen-up + pen-
+// down at the split point (the previous stroke ends there; the next begins
+// there).  Single-point strokes and waypoint dots pass through unchanged.
+// A non-positive maxLengthUnits is a no-op.
+HpglDoc splitLongStrokes(const HpglDoc &src, float maxLengthUnits);
+
 // Derive the output path for an exported fix: inserts "_fixed" before the
 // last extension, or appends "_fixed.hpgl" if there is no extension.
 std::string fixedPath(const std::string &src);
