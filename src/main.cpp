@@ -399,7 +399,7 @@ int main(int argc, char** argv) {
 
     ImGui::SeparatorText("Fix");
     ImGui::BeginDisabled(g_activeLayer < 0);
-    if (ImGui::Button("Fix long pen-up jumps  [E]"))
+    if (ImGui::Button("Split long pen up strokes  [E]"))
       applyFix();
     if (ImGui::Button("Merge close strokes"))
       applyMerge();
@@ -436,6 +436,23 @@ int main(int argc, char** argv) {
 
     ImGui::SeparatorText("Export");
     ImGui::BeginDisabled(g_activeLayer < 0);
+    if (ImGui::Button("Export dots + lines (separate files)")) {
+      Layer &al = g_layers[g_activeLayer];
+      auto split = splitDotsAndLines(al.doc);
+      std::string dPath = dotsPath(al.path);
+      std::string lPath = linesPath(al.path);
+      bool okDots  = split.dots.empty()  || exportHpgl(split.dots,  dPath, g_vsValue);
+      bool okLines = split.lines.empty() || exportHpgl(split.lines, lPath, g_vsValue);
+      if (okDots && okLines) {
+        std::string msg = "Saved:";
+        if (!split.dots.empty())  msg += " " + dPath;
+        if (!split.lines.empty()) msg += " " + lPath;
+        if (split.dots.empty() && split.lines.empty()) msg = "Nothing to export";
+        g_fixStatus = msg;
+      } else {
+        g_fixStatus = "Split export failed";
+      }
+    }
     if (ImGui::Button("Export PNG")) {
       std::string pngPath;
       if (g_activeLayer >= 0)

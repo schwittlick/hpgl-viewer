@@ -41,6 +41,18 @@ HpglDoc mergeCloseStrokes(const HpglDoc &src, const float thresholdsUnits[10]);
 // A non-positive maxLengthUnits is a no-op.
 HpglDoc splitLongStrokes(const HpglDoc &src, float maxLengthUnits);
 
+// Partition a document into dots-only and lines-only sub-documents.
+// A "dot" is a stroke with a single point or with all points coincident.
+// Empty strokes are dropped.  Document bounds are recomputed for each.
+struct DotsLinesSplit { HpglDoc dots; HpglDoc lines; };
+DotsLinesSplit splitDotsAndLines(const HpglDoc &src);
+
+// Derive the output paths used by the dots/lines split export: inserts
+// "_dots" / "_lines" before the last extension (or appends "_dots.hpgl" /
+// "_lines.hpgl" if there is no extension).
+std::string dotsPath(const std::string &src);
+std::string linesPath(const std::string &src);
+
 // Derive the output path for an exported fix: inserts "_fixed" before the
 // last extension, or appends "_fixed.hpgl" if there is no extension.
 std::string fixedPath(const std::string &src);

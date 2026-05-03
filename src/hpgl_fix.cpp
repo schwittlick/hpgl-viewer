@@ -1,5 +1,6 @@
 #include "hpgl_fix.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 
@@ -145,6 +146,48 @@ HpglDoc splitLongStrokes(const HpglDoc &src, float maxLengthUnits) {
   return result;
 }
 
+static bool isDotStroke(const Stroke &s) {
+  if (s.points.empty()) return false;
+  const Vec2 &first = s.points.front();
+  for (size_t i = 1; i < s.points.size(); ++i)
+    if (!(s.points[i] == first)) return false;
+  return true;
+}
+
+static void recomputeDocBounds(HpglDoc &d) {
+  d.minX = d.minY =  1e30f;
+  d.maxX = d.maxY = -1e30f;
+  for (const auto &s : d.strokes) {
+    for (const auto &p : s.points) {
+      d.minX = std::min(d.minX, p.x);
+      d.minY = std::min(d.minY, p.y);
+      d.maxX = std::max(d.maxX, p.x);
+      d.maxY = std::max(d.maxY, p.y);
+    }
+  }
+}
+
+DotsLinesSplit splitDotsAndLines(const HpglDoc &src) {
+  DotsLinesSplit out;
+  for (const auto &s : src.strokes) {
+    if (s.points.empty()) continue;
+    if (isDotStroke(s)) out.dots.strokes.push_back(s);
+    else                out.lines.strokes.push_back(s);
+  }
+  recomputeDocBounds(out.dots);
+  recomputeDocBounds(out.lines);
+  return out;
+}
+
+static std::string suffixPath(const std::string &src, const std::string &suffix) {
+  auto dot = src.rfind('.');
+  if (dot == std::string::npos) return src + suffix + ".hpgl";
+  return src.substr(0, dot) + suffix + src.substr(dot);
+}
+
+std::string dotsPath(const std::string &src)  { return suffixPath(src, "_dots"); }
+std::string linesPath(const std::string &src) { return suffixPath(src, "_lines"); }
+
 bool exportHpgl(const HpglDoc &doc, const std::string &path, int vsValue) {
   FILE *f = fopen(path.c_str(), "w");
   if (!f) return false;
@@ -210,8 +253,4 @@ DocStats computeDocStats(const HpglDoc &doc) {
   return stats;
 }
 
-std::string fixedPath(const std::string &src) {
-  auto dot = src.rfind('.');
-  if (dot == std::string::npos) return src + "_fixed.hpgl";
-  return src.substr(0, dot) + "_fixed" + src.substr(dot);
-}
+std::string fixedPath(const std::string &src) { return suffixPath(src, "_fixed"); }

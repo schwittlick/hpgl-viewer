@@ -471,6 +471,89 @@ static void test_split_bbox_populated() {
   }
 }
 
+// ── splitDotsAndLines ────────────────────────────────────────────────────────
+
+static void test_split_dots_lines_partitions_by_kind() {
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {100.f, 0.f}}, 1});           // line
+  doc.strokes.push_back(Stroke{{{50.f, 50.f}}, 2});                        // dot
+  doc.strokes.push_back(Stroke{{{200.f, 0.f}, {300.f, 0.f}}, 3});         // line
+  doc.strokes.push_back(Stroke{{{75.f, 75.f}, {75.f, 75.f}}, 4});         // dot (coincident)
+  auto out = splitDotsAndLines(doc);
+  REQUIRE(out.dots.strokes.size()  == 2);
+  REQUIRE(out.lines.strokes.size() == 2);
+  REQUIRE(out.dots.strokes[0].pen  == 2);
+  REQUIRE(out.dots.strokes[1].pen  == 4);
+  REQUIRE(out.lines.strokes[0].pen == 1);
+  REQUIRE(out.lines.strokes[1].pen == 3);
+}
+
+static void test_split_dots_lines_drops_empty() {
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{}, 1});
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}}, 1});
+  auto out = splitDotsAndLines(doc);
+  REQUIRE(out.dots.strokes.size()  == 1);
+  REQUIRE(out.lines.strokes.size() == 0);
+}
+
+static void test_split_dots_lines_recomputes_bounds() {
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {100.f, 50.f}}, 1});  // line
+  doc.strokes.push_back(Stroke{{{200.f, 300.f}}, 1});              // dot
+  auto out = splitDotsAndLines(doc);
+  REQUIRE(out.lines.minX == 0.f); REQUIRE(out.lines.maxX == 100.f);
+  REQUIRE(out.lines.minY == 0.f); REQUIRE(out.lines.maxY ==  50.f);
+  REQUIRE(out.dots.minX  == 200.f); REQUIRE(out.dots.maxX == 200.f);
+  REQUIRE(out.dots.minY  == 300.f); REQUIRE(out.dots.maxY == 300.f);
+}
+
+static void test_split_dots_lines_all_dots() {
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}}, 1});
+  doc.strokes.push_back(Stroke{{{1.f, 1.f}, {1.f, 1.f}}, 1});
+  auto out = splitDotsAndLines(doc);
+  REQUIRE(out.dots.strokes.size()  == 2);
+  REQUIRE(out.lines.empty());
+}
+
+static void test_split_dots_lines_all_lines() {
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {1.f, 0.f}}, 1});
+  doc.strokes.push_back(Stroke{{{2.f, 0.f}, {3.f, 0.f}, {3.f, 1.f}}, 1});
+  auto out = splitDotsAndLines(doc);
+  REQUIRE(out.lines.strokes.size() == 2);
+  REQUIRE(out.dots.empty());
+}
+
+static void test_split_dots_lines_export_roundtrip() {
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {100.f, 0.f}}, 1});
+  doc.strokes.push_back(Stroke{{{50.f, 50.f}}, 2});
+  auto out = splitDotsAndLines(doc);
+
+  const std::string dTmp = "/tmp/test_split_dots.hpgl";
+  const std::string lTmp = "/tmp/test_split_lines.hpgl";
+  REQUIRE(exportHpgl(out.dots,  dTmp));
+  REQUIRE(exportHpgl(out.lines, lTmp));
+
+  HpglDoc dotsRe  = HpglParser{}.parseFile(dTmp);
+  HpglDoc linesRe = HpglParser{}.parseFile(lTmp);
+  REQUIRE(dotsRe.strokes.size()  == 1);
+  REQUIRE(linesRe.strokes.size() == 1);
+  REQUIRE(dotsRe.strokes[0].points.size()  == 1);
+  REQUIRE(linesRe.strokes[0].points.size() == 2);
+  remove(dTmp.c_str()); remove(lTmp.c_str());
+}
+
+static void test_dots_lines_paths() {
+  REQUIRE(dotsPath("foo/bar.hpgl")  == "foo/bar_dots.hpgl");
+  REQUIRE(linesPath("foo/bar.hpgl") == "foo/bar_lines.hpgl");
+  REQUIRE(dotsPath("foo/bar")       == "foo/bar_dots.hpgl");
+  REQUIRE(linesPath("foo/bar")      == "foo/bar_lines.hpgl");
+  REQUIRE(dotsPath("/tmp/plot.plt") == "/tmp/plot_dots.plt");
+}
+
 // ── exportHpgl VS velocity ────────────────────────────────────────────────────
 
 static void test_export_vs_emitted_before_pd_multipoint() {
@@ -589,6 +672,14 @@ int main(int argc, char **argv) {
   run("split: waypoint pen passes through",   test_split_waypoint_pen_passes_through);
   run("split: bbox populated",                test_split_bbox_populated);
   run("split: export roundtrip yields PUs",   test_split_export_roundtrip_creates_pen_up_commands);
+
+  run("split dots/lines: partitions by kind", test_split_dots_lines_partitions_by_kind);
+  run("split dots/lines: drops empty",        test_split_dots_lines_drops_empty);
+  run("split dots/lines: recomputes bounds",  test_split_dots_lines_recomputes_bounds);
+  run("split dots/lines: all dots",           test_split_dots_lines_all_dots);
+  run("split dots/lines: all lines",          test_split_dots_lines_all_lines);
+  run("split dots/lines: export roundtrip",   test_split_dots_lines_export_roundtrip);
+  run("dotsPath / linesPath",                  test_dots_lines_paths);
 
   run("export VS emitted for multipoint",     test_export_vs_emitted_before_pd_multipoint);
   run("export VS not emitted for dot",        test_export_vs_not_emitted_for_dot);
