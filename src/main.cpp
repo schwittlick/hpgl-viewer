@@ -69,10 +69,10 @@ static float g_panX = 0, g_panY = 0, g_scale = 1.0f;
 static float g_rotation = 0.0f;
 static bool  g_showPenUp = false;
 static bool  g_showCoords = true;
-static float g_penUpThreshold =  10.0f; // cm
-static float g_fixStepCm      =   2.0f; // cm between inserted waypoints
-static float g_splitMaxLenCm  =   2.0f; // cm — max pen-down length per stroke
-static float g_simplifyTolMm  =   0.05f; // mm — collinear tolerance
+static float g_penUpThreshold =  30.0f; // cm
+static float g_fixStepCm      =   3.0f; // cm between inserted waypoints
+static float g_splitMaxLenCm  =   1.0f; // cm — max pen-down length per stroke
+static float g_simplifyTolMm  =   0.015f; // mm — collinear tolerance
 
 // Framebuffer size (updated each frame)
 static int g_fbW = 0, g_fbH = 0;
