@@ -13,7 +13,7 @@ A lightweight HPGL file viewer built with Dear ImGui + OpenGL3 + GLFW.
 
 ## Features
 
-- Open `.hpgl` / `.plt` files via path input, drag-and-drop, or `O` key
+- Open `.hpgl` / `.plt` files via path input, drag-and-drop, or `O` key — files are parsed on a worker thread with a progress bar overlay; multiple drops queue and load sequentially
 - Add multiple files as layers (`A` key or drag-and-drop additional files)
 - Pan (left-drag or middle-drag), zoom to cursor (scroll wheel), rotate 90° (`R`)
 - Fit-to-window (`C`), fullscreen (`F`)

@@ -250,6 +250,45 @@ static void test_no_trailing_semicolon_parsed() {
   REQUIRE((doc.strokes[0].points.back() == Vec2{100.f, 200.f}));
 }
 
+// ── Progress reporting ───────────────────────────────────────────────────────
+
+static void test_progress_reaches_one_after_parse() {
+  std::atomic<float> progress{0.0f};
+  HpglParser{}.parse("PD100,200;PA0,0,50,50;", &progress);
+  REQUIRE(progress.load() == 1.0f);
+}
+
+static void test_progress_null_pointer_does_not_crash() {
+  // Parser must accept nullptr for the progress argument (default arg path).
+  HpglDoc doc = HpglParser{}.parse("PD100,200;", nullptr);
+  REQUIRE(doc.strokes.size() == 1);
+}
+
+static void test_progress_empty_input_reaches_one() {
+  // Even with empty input the parser must mark progress complete on return.
+  std::atomic<float> progress{0.0f};
+  HpglParser{}.parse("", &progress);
+  REQUIRE(progress.load() == 1.0f);
+}
+
+static void test_progress_increases_on_large_input() {
+  // Build a >256 KB input — well past the 64 KB stride — so the in-loop
+  // updater fires multiple times.  We can't observe intermediate values
+  // synchronously, but we can verify the final value is 1.0 and that the
+  // parser handled the volume correctly (every PD produces one stroke).
+  std::string content;
+  content.reserve(300 * 1024);
+  int strokes = 0;
+  while (content.size() < 256 * 1024) {
+    content += "PD100,200;PU;";
+    ++strokes;
+  }
+  std::atomic<float> progress{0.0f};
+  HpglDoc doc = HpglParser{}.parse(content, &progress);
+  REQUIRE(progress.load() == 1.0f);
+  REQUIRE(static_cast<int>(doc.strokes.size()) == strokes);
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 int main() {
@@ -282,6 +321,10 @@ int main() {
   run("SP no arg leaves pen unchanged",     test_sp_no_arg_leaves_pen_unchanged);
   run("SP0 resets current stroke",          test_sp0_resets_current_stroke);
   run("no trailing semicolon parsed",       test_no_trailing_semicolon_parsed);
+  run("progress reaches 1.0 after parse",   test_progress_reaches_one_after_parse);
+  run("progress null pointer no crash",     test_progress_null_pointer_does_not_crash);
+  run("progress empty input reaches 1.0",   test_progress_empty_input_reaches_one);
+  run("progress increases on large input",  test_progress_increases_on_large_input);
 
   printf("\n%d/%d passed\n", g_pass, g_pass + g_fail);
   return g_fail > 0 ? 1 : 0;

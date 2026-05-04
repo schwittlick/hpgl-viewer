@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cmath>
 #include <string>
 #include <vector>
@@ -29,11 +30,16 @@ struct HpglDoc {
 
 class HpglParser {
 public:
-  // Parse HPGL from an in-memory string.
-  HpglDoc parse(const std::string &content);
+  // Parse HPGL from an in-memory string.  If progress is non-null, the
+  // parser updates it to the fraction of bytes consumed (0.0 → 1.0) so
+  // a worker thread can report progress to a UI.
+  HpglDoc parse(const std::string &content,
+                std::atomic<float> *progress = nullptr);
 
-  // Convenience: read file then parse.
-  HpglDoc parseFile(const std::string &path);
+  // Convenience: read file then parse.  Progress reflects the parse phase
+  // (file-read time is small relative to parse on large inputs).
+  HpglDoc parseFile(const std::string &path,
+                    std::atomic<float> *progress = nullptr);
 
 private:
   void handleSP(const std::string &params);

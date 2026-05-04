@@ -1,9 +1,12 @@
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
+#include <memory>
 #include <string>
+#include <thread>
 
 #include "config.h"
 #include "export_png.h"
@@ -164,21 +167,78 @@ static void toggleFullscreen(GLFWwindow *window) {
   }
 }
 
-// Load path as a new layer. If replace=true, clear existing layers first.
-static void loadFile(const std::string &path, bool replace = true) {
-  if (replace) {
+// ─── Async file loading
+// ──────────────────────────────────────────────────────
+
+struct LoadJob {
+  std::string         path;
+  bool                replace = true;
+  std::atomic<float>  progress{0.0f};
+  std::atomic<bool>   done{false};
+  HpglDoc             result;
+  std::thread         worker;
+
+  ~LoadJob() { if (worker.joinable()) worker.join(); }
+};
+
+struct PendingLoad { std::string path; bool replace; };
+
+static std::unique_ptr<LoadJob>  g_loadJob;
+static std::vector<PendingLoad>  g_loadQueue;
+static GLFWwindow               *g_window = nullptr; // for glfwPostEmptyEvent
+
+static void startLoadJob(const std::string &path, bool replace) {
+  auto job = std::make_unique<LoadJob>();
+  job->path    = path;
+  job->replace = replace;
+
+  LoadJob *raw = job.get();
+  job->worker = std::thread([raw]() {
+    raw->result = HpglParser{}.parseFile(raw->path, &raw->progress);
+    raw->done.store(true, std::memory_order_release);
+    if (g_window) glfwPostEmptyEvent();
+  });
+
+  g_loadJob = std::move(job);
+}
+
+static void enqueueLoad(const std::string &path, bool replace = true) {
+  if (g_loadJob) {
+    g_loadQueue.push_back({path, replace});
+    return;
+  }
+  startLoadJob(path, replace);
+}
+
+// Drain a completed job onto the layer list.  Returns true if the cached
+// renderers/stats need a rebuild.
+static bool installCompletedJob() {
+  if (!g_loadJob || !g_loadJob->done.load(std::memory_order_acquire))
+    return false;
+
+  if (g_loadJob->worker.joinable()) g_loadJob->worker.join();
+
+  if (g_loadJob->replace) {
     g_layers.clear();
     g_activeLayer = -1;
   }
   Layer layer;
-  layer.path = path;
-  layer.doc  = HpglParser{}.parseFile(path);
+  layer.path = g_loadJob->path;
+  layer.doc  = std::move(g_loadJob->result);
   g_layers.push_back(std::move(layer));
   g_activeLayer = static_cast<int>(g_layers.size()) - 1;
-  rebuildPenUpRenderer();
-  refreshDocStats();
   g_fitRequested = true;
   g_fixStatus.clear();
+
+  g_loadJob.reset();
+
+  // Start the next queued load (if any) without rebuilding twice.
+  if (!g_loadQueue.empty()) {
+    PendingLoad next = g_loadQueue.front();
+    g_loadQueue.erase(g_loadQueue.begin());
+    startLoadJob(next.path, next.replace);
+  }
+  return true;
 }
 
 static void applyFix() {
@@ -265,18 +325,28 @@ int main(int argc, char** argv) {
   initPenColors(g_pens);
   g_lastOpenDir = configLoad("last_open_dir");
 
+  g_window = window;
+
   if (argc > 1)
-    loadFile(argv[1]);
+    enqueueLoad(argv[1]);
 
   glfwSetDropCallback(window, [](GLFWwindow*, int count, const char** paths) {
     bool replace = g_layers.empty();
     for (int i = 0; i < count; ++i) {
-      loadFile(paths[i], replace && i == 0);
+      enqueueLoad(paths[i], replace && i == 0);
     }
   });
 
   while (!glfwWindowShouldClose(window)) {
-    glfwWaitEvents();
+    // While a load job is in flight, poll at ~30 Hz so the progress bar
+    // animates smoothly even though no UI events are arriving.
+    if (g_loadJob) glfwWaitEventsTimeout(0.033);
+    else           glfwWaitEvents();
+
+    if (installCompletedJob()) {
+      rebuildPenUpRenderer();
+      refreshDocStats();
+    }
 
     glfwGetFramebufferSize(window, &g_fbW, &g_fbH);
 
@@ -300,11 +370,11 @@ int main(int argc, char** argv) {
         applyFix();
       if (ImGui::IsKeyPressed(ImGuiKey_O)) {
         std::string path = openFileDialog();
-        if (!path.empty()) loadFile(path);
+        if (!path.empty()) enqueueLoad(path);
       }
       if (ImGui::IsKeyPressed(ImGuiKey_A)) {
         std::string path = openFileDialog();
-        if (!path.empty()) loadFile(path, /*replace=*/false);
+        if (!path.empty()) enqueueLoad(path, /*replace=*/false);
       }
       if (ImGui::IsKeyPressed(ImGuiKey_U)) {
         g_layers.clear();
@@ -350,10 +420,10 @@ int main(int argc, char** argv) {
     ImGui::InputText("##path", g_filePathBuf, sizeof(g_filePathBuf));
     ImGui::SameLine();
     if (ImGui::Button("Open"))
-      loadFile(g_filePathBuf);
+      enqueueLoad(g_filePathBuf);
     ImGui::SameLine();
     if (ImGui::Button("Add"))
-      loadFile(g_filePathBuf, /*replace=*/false);
+      enqueueLoad(g_filePathBuf, /*replace=*/false);
 
     for (int i = 0; i < static_cast<int>(g_layers.size()); ++i) {
       ImGui::PushID(i);
@@ -627,6 +697,42 @@ int main(int argc, char** argv) {
         ImVec2 pos = {canvasPos.x + cW - sz.x - pad * 1.5f,
                       canvasPos.y + pad * 1.5f + li * step};
         dl->AddText(pos, IM_COL32(255, 255, 255, 230), lines[li]);
+      }
+    }
+
+    // Loading progress overlay — centred at the top of the canvas.
+    if (g_loadJob) {
+      float frac = g_loadJob->progress.load(std::memory_order_relaxed);
+      std::string fname = fs::path(g_loadJob->path).filename().string();
+      std::string label = "Loading " + fname;
+      char pct[16];
+      snprintf(pct, sizeof(pct), "%.0f%%", frac * 100.0f);
+
+      constexpr float kPad     = 10.0f;
+      constexpr float kBoxH    = 56.0f;
+      constexpr float kMinBoxW = 360.0f;
+      ImVec2 labelSz = ImGui::CalcTextSize(label.c_str());
+      ImVec2 pctSz   = ImGui::CalcTextSize(pct);
+      // Label and percentage share a row — leave kPad between them.
+      float fitW   = labelSz.x + pctSz.x + kPad * 3.0f;
+      float boxW   = std::min(cW - 2 * kPad, std::max(kMinBoxW, fitW));
+      ImVec2 boxMin = {canvasPos.x + (cW - boxW) * 0.5f, canvasPos.y + 12.0f};
+      ImVec2 boxMax = {boxMin.x + boxW, boxMin.y + kBoxH};
+      dl->AddRectFilled(boxMin, boxMax, IM_COL32(0, 0, 0, 200), 6.0f);
+      dl->AddText({boxMin.x + kPad, boxMin.y + 8},
+                  IM_COL32(255, 255, 255, 230), label.c_str());
+      ImVec2 barMin = {boxMin.x + kPad, boxMin.y + 30};
+      ImVec2 barMax = {boxMax.x - kPad, boxMax.y - kPad};
+      dl->AddRectFilled(barMin, barMax, IM_COL32(60, 60, 60, 255), 3.0f);
+      ImVec2 fillMax = {barMin.x + (barMax.x - barMin.x) * frac, barMax.y};
+      dl->AddRectFilled(barMin, fillMax, IM_COL32(80, 180, 255, 255), 3.0f);
+      dl->AddText({barMax.x - pctSz.x, boxMin.y + 8},
+                  IM_COL32(255, 255, 255, 230), pct);
+      if (!g_loadQueue.empty()) {
+        char q[32];
+        snprintf(q, sizeof(q), "+%zu queued", g_loadQueue.size());
+        dl->AddText({boxMin.x + kPad, barMax.y - 2},
+                    IM_COL32(200, 200, 200, 200), q);
       }
     }
 

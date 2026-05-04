@@ -104,7 +104,8 @@ void HpglParser::handlePA(const std::string &params) {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-HpglDoc HpglParser::parse(const std::string &content) {
+HpglDoc HpglParser::parse(const std::string &content,
+                          std::atomic<float> *progress) {
   // Reset state for a fresh parse.
   doc      = {};
   currentPen = 1;
@@ -113,7 +114,17 @@ HpglDoc HpglParser::parse(const std::string &content) {
   curIdx     = -1;
 
   size_t pos = 0;
+  size_t nextProgressAt = 0;
+  // Update progress every ~64 KB of input — atomic stores are cheap but the
+  // rate-limit avoids cache-line ping-pong with the polling thread.
+  constexpr size_t kProgressStride = 64 * 1024;
   while (pos < content.size()) {
+    if (progress && pos >= nextProgressAt) {
+      progress->store(static_cast<float>(pos) /
+                      static_cast<float>(content.size()),
+                      std::memory_order_relaxed);
+      nextProgressAt = pos + kProgressStride;
+    }
     // Skip whitespace and semicolons.
     while (pos < content.size() &&
            (content[pos] == ';' || content[pos] == ' ' ||
@@ -148,14 +159,16 @@ HpglDoc HpglParser::parse(const std::string &content) {
     doc.maxX = doc.maxY = 1;
   }
 
+  if (progress) progress->store(1.0f, std::memory_order_relaxed);
   return doc;
 }
 
-HpglDoc HpglParser::parseFile(const std::string &path) {
+HpglDoc HpglParser::parseFile(const std::string &path,
+                              std::atomic<float> *progress) {
   std::ifstream f(path);
   if (!f)
     return {};
   std::string content((std::istreambuf_iterator<char>(f)),
                       std::istreambuf_iterator<char>());
-  return parse(content);
+  return parse(content, progress);
 }
