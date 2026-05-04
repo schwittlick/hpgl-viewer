@@ -146,6 +146,56 @@ HpglDoc splitLongStrokes(const HpglDoc &src, float maxLengthUnits) {
   return result;
 }
 
+// Distance from p to the segment a→c.  If p projects outside the segment,
+// returns the Euclidean distance to the nearer endpoint — so back-tracking
+// (p collinear with a-c but beyond either end) is preserved by callers that
+// compare against a small tolerance.
+static float distFromSegment(Vec2 p, Vec2 a, Vec2 c) {
+  float abx = c.x - a.x, aby = c.y - a.y;
+  float apx = p.x - a.x, apy = p.y - a.y;
+  float lenSq = abx*abx + aby*aby;
+  if (lenSq == 0.0f) return sqrtf(apx*apx + apy*apy);
+  float t = (apx*abx + apy*aby) / lenSq;
+  if (t < 0.0f) return sqrtf(apx*apx + apy*apy);
+  if (t > 1.0f) {
+    float cpx = p.x - c.x, cpy = p.y - c.y;
+    return sqrtf(cpx*cpx + cpy*cpy);
+  }
+  float cross = apx*aby - apy*abx;
+  return fabsf(cross) / sqrtf(lenSq);
+}
+
+HpglDoc simplifyCollinear(const HpglDoc &src, float toleranceUnits) {
+  HpglDoc result = src;
+  if (toleranceUnits < 0.0f) return result;
+  for (auto &s : result.strokes) {
+    if (s.points.size() < 3 || s.pen == kWaypointPen) continue;
+
+    std::vector<Vec2> kept;
+    kept.reserve(s.points.size());
+    kept.push_back(s.points.front());
+    for (size_t i = 1; i + 1 < s.points.size(); ++i) {
+      Vec2 a = kept.back();
+      Vec2 b = s.points[i];
+      Vec2 c = s.points[i + 1];
+      if (distFromSegment(b, a, c) > toleranceUnits)
+        kept.push_back(b);
+    }
+    kept.push_back(s.points.back());
+    s.points = std::move(kept);
+
+    s.bboxMin = { 1e30f,  1e30f};
+    s.bboxMax = {-1e30f, -1e30f};
+    for (const auto &p : s.points) {
+      s.bboxMin.x = std::min(s.bboxMin.x, p.x);
+      s.bboxMin.y = std::min(s.bboxMin.y, p.y);
+      s.bboxMax.x = std::max(s.bboxMax.x, p.x);
+      s.bboxMax.y = std::max(s.bboxMax.y, p.y);
+    }
+  }
+  return result;
+}
+
 static bool isDotStroke(const Stroke &s) {
   if (s.points.empty()) return false;
   const Vec2 &first = s.points.front();

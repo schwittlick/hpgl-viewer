@@ -26,6 +26,7 @@ A lightweight HPGL file viewer built with Dear ImGui + OpenGL3 + GLFW.
   - **Left zone** slider: only fix moves that start within the leftmost X% of the document
 - Merge close strokes: combines consecutive same-pen strokes whose gap (end→start) is ≤ the pen's configured width, eliminating unnecessary pen-up/down movements between nearly-adjacent strokes; chains of strokes are merged together
 - Split long strokes: breaks any pen-down stroke whose polyline length exceeds **Max stroke length** into multiple shorter consecutive strokes (pen lifts and drops back down at the split point) — useful for ink-flow on long continuous lines
+- Simplify collinear points: removes redundant interior points within a stroke — a middle point is dropped when its perpendicular distance to the segment between its neighbours is within **Collinear tol** (mm) AND it projects between them (so back-and-forth on the same axis is preserved)
 - Export dots + lines to separate HPGL files: writes `<name>_dots.hpgl` (every single-point or all-coincident-point stroke) and `<name>_lines.hpgl` (everything else) — useful for plotting dots and lines with a different pen on the plotter
 - PNG export at physical DPI
 

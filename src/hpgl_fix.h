@@ -41,6 +41,13 @@ HpglDoc mergeCloseStrokes(const HpglDoc &src, const float thresholdsUnits[10]);
 // A non-positive maxLengthUnits is a no-op.
 HpglDoc splitLongStrokes(const HpglDoc &src, float maxLengthUnits);
 
+// Drop redundant interior points within each stroke: a middle point p[i] is
+// removed when its perpendicular distance to the line between the previous
+// kept point and p[i+1] is ≤ toleranceUnits AND its projection falls between
+// them.  Strokes with fewer than 3 points and waypoint-pen strokes pass
+// through unchanged.  A negative toleranceUnits is a no-op.
+HpglDoc simplifyCollinear(const HpglDoc &src, float toleranceUnits);
+
 // Partition a document into dots-only and lines-only sub-documents.
 // A "dot" is a stroke with a single point or with all points coincident.
 // Empty strokes are dropped.  Document bounds are recomputed for each.

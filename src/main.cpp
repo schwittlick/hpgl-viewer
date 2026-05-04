@@ -72,6 +72,7 @@ static bool  g_showCoords = true;
 static float g_penUpThreshold =  10.0f; // cm
 static float g_fixStepCm      =   2.0f; // cm between inserted waypoints
 static float g_splitMaxLenCm  =   2.0f; // cm — max pen-down length per stroke
+static float g_simplifyTolMm  =   0.05f; // mm — collinear tolerance
 
 // Framebuffer size (updated each frame)
 static int g_fbW = 0, g_fbH = 0;
@@ -217,6 +218,17 @@ static void applySplit() {
   rebuildPenUpRenderer();
   refreshDocStats();
   g_fixStatus = "Split (not yet saved)";
+}
+
+static void applySimplify() {
+  if (g_activeLayer < 0 || g_activeLayer >= static_cast<int>(g_layers.size()))
+    return;
+  Layer &l = g_layers[g_activeLayer];
+  l.doc = simplifyCollinear(l.doc, g_simplifyTolMm * kHpglUnitsPerMm);
+  l.hasFixed = true;
+  rebuildPenUpRenderer();
+  refreshDocStats();
+  g_fixStatus = "Simplified (not yet saved)";
 }
 
 // ─── Main
@@ -405,6 +417,8 @@ int main(int argc, char** argv) {
       applyMerge();
     if (ImGui::Button("Split long strokes"))
       applySplit();
+    if (ImGui::Button("Simplify collinear points"))
+      applySimplify();
     bool activeHasFixed = g_activeLayer >= 0 &&
                           g_layers[g_activeLayer].hasFixed;
     ImGui::BeginDisabled(!activeHasFixed);
@@ -473,6 +487,8 @@ int main(int argc, char** argv) {
     ImGui::SliderFloat("Waypoint spacing", &g_fixStepCm, 0.5f, 20.0f, "%.1f cm");
     ImGui::SetNextItemWidth(150);
     ImGui::SliderFloat("Max stroke length", &g_splitMaxLenCm, 0.1f, 20.0f, "%.1f cm");
+    ImGui::SetNextItemWidth(150);
+    ImGui::SliderFloat("Collinear tol", &g_simplifyTolMm, 0.0f, 1.0f, "%.3f mm");
     if (!g_fixStatus.empty())
       ImGui::TextWrapped("%s", g_fixStatus.c_str());
 

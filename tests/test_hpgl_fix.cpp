@@ -471,6 +471,108 @@ static void test_split_bbox_populated() {
   }
 }
 
+// ── simplifyCollinear ────────────────────────────────────────────────────────
+
+static void test_simplify_drops_exact_collinear_midpoint() {
+  // (0,0) — (50,0) — (100,0): midpoint is exactly on segment.
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {50.f, 0.f}, {100.f, 0.f}}, 1});
+  HpglDoc out = simplifyCollinear(doc, 0.5f);
+  REQUIRE(out.strokes.size() == 1);
+  REQUIRE(out.strokes[0].points.size() == 2);
+  REQUIRE((out.strokes[0].points[0] == Vec2{0.f,   0.f}));
+  REQUIRE((out.strokes[0].points[1] == Vec2{100.f, 0.f}));
+}
+
+static void test_simplify_keeps_non_collinear() {
+  // L-shape: (0,0) — (100,0) — (100,100).  Middle is a corner, must be kept.
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {100.f, 0.f}, {100.f, 100.f}}, 1});
+  HpglDoc out = simplifyCollinear(doc, 0.5f);
+  REQUIRE(out.strokes[0].points.size() == 3);
+}
+
+static void test_simplify_chain_of_collinear() {
+  // Five points on x-axis — only endpoints survive.
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{
+    {0.f, 0.f}, {10.f, 0.f}, {25.f, 0.f}, {50.f, 0.f}, {100.f, 0.f}
+  }, 1});
+  HpglDoc out = simplifyCollinear(doc, 0.5f);
+  REQUIRE(out.strokes[0].points.size() == 2);
+  REQUIRE((out.strokes[0].points[0] == Vec2{0.f,   0.f}));
+  REQUIRE((out.strokes[0].points[1] == Vec2{100.f, 0.f}));
+}
+
+static void test_simplify_within_tolerance() {
+  // Middle point off line by 0.3 — within tol of 1.0 → drop.
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {50.f, 0.3f}, {100.f, 0.f}}, 1});
+  HpglDoc out = simplifyCollinear(doc, 1.0f);
+  REQUIRE(out.strokes[0].points.size() == 2);
+}
+
+static void test_simplify_outside_tolerance() {
+  // Middle point off line by 5 units — far above tol of 1 → keep.
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {50.f, 5.f}, {100.f, 0.f}}, 1});
+  HpglDoc out = simplifyCollinear(doc, 1.0f);
+  REQUIRE(out.strokes[0].points.size() == 3);
+}
+
+static void test_simplify_keeps_backtrack() {
+  // (0,0) — (100,0) — (50,0): collinear by line, but middle point projects
+  // beyond endpoint c=(50,0), so its segment-distance to a-c is 50 — far
+  // above tol.  Must be kept (back-and-forth on the same axis).
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {100.f, 0.f}, {50.f, 0.f}}, 1});
+  HpglDoc out = simplifyCollinear(doc, 0.5f);
+  REQUIRE(out.strokes[0].points.size() == 3);
+}
+
+static void test_simplify_short_stroke_unchanged() {
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {100.f, 0.f}}, 1});
+  HpglDoc out = simplifyCollinear(doc, 1.0f);
+  REQUIRE(out.strokes[0].points.size() == 2);
+}
+
+static void test_simplify_waypoint_pen_passes_through() {
+  // Pen-8 dot strokes must not be touched even at size 3 (defensive).
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {0.f, 0.f}, {0.f, 0.f}}, kWaypointPen});
+  HpglDoc out = simplifyCollinear(doc, 1.0f);
+  REQUIRE(out.strokes[0].points.size() == 3);
+  REQUIRE(out.strokes[0].pen == kWaypointPen);
+}
+
+static void test_simplify_negative_tol_is_noop() {
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {50.f, 0.f}, {100.f, 0.f}}, 1});
+  HpglDoc out = simplifyCollinear(doc, -1.0f);
+  REQUIRE(out.strokes[0].points.size() == 3);
+}
+
+static void test_simplify_zero_tol_keeps_floating_noise() {
+  // Tol=0 only drops *exact* collinear points.  0.001 noise → kept.
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {50.f, 0.001f}, {100.f, 0.f}}, 1});
+  HpglDoc out = simplifyCollinear(doc, 0.0f);
+  REQUIRE(out.strokes[0].points.size() == 3);
+}
+
+static void test_simplify_recomputes_bbox() {
+  // After dropping the middle point of an L, the surviving bbox must still
+  // span the full extent of remaining points (a finite bbox, not the sentinel).
+  HpglDoc doc;
+  doc.strokes.push_back(Stroke{{{0.f, 0.f}, {50.f, 0.f}, {100.f, 0.f}}, 1});
+  HpglDoc out = simplifyCollinear(doc, 0.5f);
+  REQUIRE(out.strokes[0].bboxMin.x ==   0.f);
+  REQUIRE(out.strokes[0].bboxMax.x == 100.f);
+  REQUIRE(out.strokes[0].bboxMin.y ==   0.f);
+  REQUIRE(out.strokes[0].bboxMax.y ==   0.f);
+}
+
 // ── splitDotsAndLines ────────────────────────────────────────────────────────
 
 static void test_split_dots_lines_partitions_by_kind() {
@@ -672,6 +774,18 @@ int main(int argc, char **argv) {
   run("split: waypoint pen passes through",   test_split_waypoint_pen_passes_through);
   run("split: bbox populated",                test_split_bbox_populated);
   run("split: export roundtrip yields PUs",   test_split_export_roundtrip_creates_pen_up_commands);
+
+  run("simplify: drops exact collinear",      test_simplify_drops_exact_collinear_midpoint);
+  run("simplify: keeps non-collinear",        test_simplify_keeps_non_collinear);
+  run("simplify: chain of collinear",         test_simplify_chain_of_collinear);
+  run("simplify: within tolerance",           test_simplify_within_tolerance);
+  run("simplify: outside tolerance",          test_simplify_outside_tolerance);
+  run("simplify: keeps backtrack",            test_simplify_keeps_backtrack);
+  run("simplify: short stroke unchanged",     test_simplify_short_stroke_unchanged);
+  run("simplify: waypoint pen passes through", test_simplify_waypoint_pen_passes_through);
+  run("simplify: negative tol is no-op",      test_simplify_negative_tol_is_noop);
+  run("simplify: zero tol keeps noise",       test_simplify_zero_tol_keeps_floating_noise);
+  run("simplify: recomputes bbox",            test_simplify_recomputes_bbox);
 
   run("split dots/lines: partitions by kind", test_split_dots_lines_partitions_by_kind);
   run("split dots/lines: drops empty",        test_split_dots_lines_drops_empty);
