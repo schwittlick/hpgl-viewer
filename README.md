@@ -29,6 +29,7 @@ A lightweight HPGL file viewer built with Dear ImGui + OpenGL3 + GLFW.
 - Simplify collinear points: removes redundant interior points within a stroke — a middle point is dropped when its perpendicular distance to the segment between its neighbours is within **Collinear tol** (mm) AND it projects between them (so back-and-forth on the same axis is preserved)
 - Export dots + lines to separate HPGL files: writes `<name>_dots.hpgl` (every single-point or all-coincident-point stroke) and `<name>_lines.hpgl` (everything else) — useful for plotting dots and lines with a different pen on the plotter
 - PNG export at physical DPI
+- FBO-cached canvas: GPU strokes + pen-up moves render once into an off-screen framebuffer and are sampled back via `ImGui::Image`; the cache is invalidated only when canvas-affecting state changes (pan/zoom/rotation, doc, pen colors/widths, threshold, canvas size) so panel-only interactions stay snappy on heavy files
 
 ## Keyboard shortcuts
 

@@ -72,6 +72,7 @@ static float g_panX = 0, g_panY = 0, g_scale = 1.0f;
 static float g_rotation = 0.0f;
 static bool  g_showPenUp = false;
 static bool  g_showCoords = true;
+static bool  g_useFboCache = true; // toggle to A/B-test FBO caching
 static float g_penUpThreshold =  30.0f; // cm
 static float g_fixStepCm      =   3.0f; // cm between inserted waypoints
 static float g_splitMaxLenCm  =   1.0f; // cm — max pen-down length per stroke
@@ -120,11 +121,14 @@ static HpglDoc mergedDoc() {
 static PenUpRenderer  g_penUpRenderer;
 static StrokeRenderer g_strokeRenderer;
 static HpglDoc        g_mergedDoc;   // cached — rebuilt only on load/change
+static CanvasFbo      g_canvasFbo;
+static uint64_t       g_docRev = 0; // bumped each rebuild — invalidates FBO
 
 static void rebuildRenderers() {
   g_mergedDoc = mergedDoc();
   g_penUpRenderer.upload(g_mergedDoc);
   g_strokeRenderer.upload(g_mergedDoc);
+  ++g_docRev;
 }
 
 static void rebuildPenUpRenderer() { rebuildRenderers(); }
@@ -350,6 +354,7 @@ int main(int argc, char** argv) {
 
   g_penUpRenderer.init();
   g_strokeRenderer.init();
+  g_canvasFbo.init();
 
   initPenColors(g_pens);
   g_lastOpenDir = configLoad("last_open_dir");
@@ -599,6 +604,7 @@ int main(int argc, char** argv) {
     ImGui::SeparatorText("View");
     ImGui::Checkbox("Show pen-up moves", &g_showPenUp);
     ImGui::Checkbox("Show coordinate grid", &g_showCoords);
+    ImGui::Checkbox("FBO cache", &g_useFboCache);
     ImGui::Text("Scale: %.3f", g_scale);
     ImGui::SameLine();
     if (ImGui::Button("Fit"))
@@ -702,9 +708,63 @@ int main(int argc, char** argv) {
 
     g_penUpRenderer.fbH  = g_fbH;
     g_strokeRenderer.fbH = g_fbH;
+
+    // ── FBO scene cache ──
+    // Re-render the cached scene (GPU strokes + pen-up moves) only when a
+    // canvas-affecting parameter changes.  On idle frames the canvas is a
+    // texture sample, so the Controls panel responds at full UI rate.
+    //
+    // FBO is sized in *framebuffer* pixels so ImGui::Image samples it 1:1
+    // on HiDPI (no bilinear blur, no colour dilution).  renderSceneToFbo
+    // is told the fbScale so it scales pan/zoom/line-width inputs to
+    // match — otherwise strokes would land at half scale on a 2x display.
+    float fbScale = std::max(io.DisplayFramebufferScale.x,
+                             io.DisplayFramebufferScale.y);
+    if (fbScale <= 0.f) fbScale = 1.f;
+    int fboW = std::max(1, static_cast<int>(cW * fbScale));
+    int fboH = std::max(1, static_cast<int>(cH * fbScale));
+    g_canvasFbo.resize(fboW, fboH);
+
+    // Hash of canvas-relevant state.  Anything that changes the rendered
+    // strokes/pen-up output must contribute.
+    auto h64 = [](uint64_t h, uint64_t v) {
+      h ^= v + 0x9E3779B97F4A7C15ull + (h << 6) + (h >> 2);
+      return h;
+    };
+    auto bits = [](float f) {
+      uint32_t u; memcpy(&u, &f, sizeof(u)); return static_cast<uint64_t>(u);
+    };
+    uint64_t hash = 0;
+    hash = h64(hash, g_docRev);
+    hash = h64(hash, bits(g_panX));
+    hash = h64(hash, bits(g_panY));
+    hash = h64(hash, bits(g_scale));
+    hash = h64(hash, bits(g_rotation));
+    hash = h64(hash, static_cast<uint64_t>(fboW));
+    hash = h64(hash, static_cast<uint64_t>(fboH));
+    hash = h64(hash, bits(fbScale));
+    hash = h64(hash, g_showPenUp ? 1ull : 0ull);
+    if (g_showPenUp) hash = h64(hash, bits(g_penUpThreshold));
+    for (int i = 0; i < 10; ++i) {
+      hash = h64(hash, bits(g_pens[i].color.x));
+      hash = h64(hash, bits(g_pens[i].color.y));
+      hash = h64(hash, bits(g_pens[i].color.z));
+      hash = h64(hash, bits(g_pens[i].color.w));
+      hash = h64(hash, bits(g_pens[i].thickness));
+    }
+
     DrawParams dp{g_panX, g_panY, g_scale, g_rotation,
                   g_showPenUp, g_penUpThreshold, g_pens,
-                  g_showCoords};
+                  g_showCoords,
+                  /*fboTex=*/g_useFboCache ? g_canvasFbo.tex : 0u};
+
+    static uint64_t lastSceneHash = ~uint64_t{0};
+    if (g_useFboCache && hash != lastSceneHash) {
+      renderSceneToFbo(g_canvasFbo, g_mergedDoc, dp,
+                       g_penUpRenderer, g_strokeRenderer, fbScale);
+      lastSceneHash = hash;
+    }
+
     drawHpgl(dl, canvasPos, cW, cH, g_mergedDoc, dp,
              g_penUpRenderer, g_strokeRenderer);
 

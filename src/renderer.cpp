@@ -548,11 +548,26 @@ void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW, float canvasH,
   float cosR = cosf(p.rotation);
   float sinR = sinf(p.rotation);
 
+  // Draw order:
+  //   immediate mode: grid → strokes → dots → pen-up
+  //   FBO mode:       FBO image (opaque, contains strokes+pen-up) → grid → dots
+  //
+  // In FBO mode the grid renders ON TOP of the cached strokes because the
+  // FBO is filled with the canvas background colour and would otherwise
+  // cover the grid.  Strokes are typically thin so the grid stays readable.
+  if (p.fboTex != 0) {
+    dl->AddImage(static_cast<ImTextureID>(p.fboTex),
+                 origin,
+                 {origin.x + canvasW, origin.y + canvasH},
+                 {0.f, 1.f}, {1.f, 0.f});
+  }
+
   if (p.showCoords)
     drawCoordinateSystem(dl, origin, canvasW, canvasH, doc, p);
 
   // GPU pen-down strokes — one draw call per pen (up to 8 total).
-  if (strokeRenderer.valid) {
+  // In FBO mode the caller has already rendered them into an FBO; skip here.
+  if (strokeRenderer.valid && p.fboTex == 0) {
     ImVec2 dp = ImGui::GetMainViewport()->Pos;
     ImVec2 ds = ImGui::GetIO().DisplaySize;
     strokeRenderer.origin = origin;
@@ -600,8 +615,10 @@ void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW, float canvasH,
     }
   }
 
-  // Pen-up moves — drawn via GPU VBO (one draw call for all segments)
-  if (p.showPenUp && penUpRenderer.valid && penUpRenderer.vertexCount > 0) {
+  // Pen-up moves — drawn via GPU VBO (one draw call for all segments).
+  // In FBO mode the caller has already rendered them into an FBO; skip here.
+  if (p.showPenUp && p.fboTex == 0 && penUpRenderer.valid &&
+      penUpRenderer.vertexCount > 0) {
     float t  = p.penUpThreshold * kHpglUnitsPerCm;
     ImVec2 dp = ImGui::GetMainViewport()->Pos;
     ImVec2 ds = ImGui::GetIO().DisplaySize;
@@ -623,4 +640,146 @@ void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW, float canvasH,
   }
 
   dl->PopClipRect();
+}
+
+// ── Off-screen canvas FBO ─────────────────────────────────────────────────────
+
+void CanvasFbo::init() {
+  if (valid) return;
+  glGenFramebuffers(1, &fbo);
+  glGenTextures(1, &tex);
+  valid = true;
+}
+
+void CanvasFbo::resize(int newW, int newH) {
+  if (!valid || newW <= 0 || newH <= 0) return;
+  if (newW == W && newH == H) return;
+  W = newW; H = newH;
+  glBindTexture(GL_TEXTURE_2D, tex);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, W, H, 0, GL_RGBA,
+               GL_UNSIGNED_BYTE, nullptr);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glBindTexture(GL_TEXTURE_2D, 0);
+
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                         GL_TEXTURE_2D, tex, 0);
+  GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+  if (status != GL_FRAMEBUFFER_COMPLETE)
+    fprintf(stderr, "CanvasFbo: incomplete framebuffer 0x%x\n", status);
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void CanvasFbo::destroy() {
+  if (!valid) return;
+  glDeleteFramebuffers(1, &fbo);
+  glDeleteTextures(1, &tex);
+  fbo = tex = 0;
+  W = H = 0;
+  valid = false;
+}
+
+void renderSceneToFbo(CanvasFbo &target,
+                      const HpglDoc & /*doc*/,
+                      const DrawParams &p,
+                      PenUpRenderer &penUpRenderer,
+                      StrokeRenderer &strokeRenderer,
+                      float fbScale) {
+  if (!target.valid || target.W <= 0 || target.H <= 0) return;
+
+  // Snapshot GL state we are about to mutate.  ImGui restores its own state
+  // through ImDrawCallback_ResetRenderState, but other callers may not.
+  GLint prevFbo = 0, prevVp[4] = {0,0,0,0}, prevProgram = 0, prevVao = 0;
+  glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFbo);
+  glGetIntegerv(GL_VIEWPORT,             prevVp);
+  glGetIntegerv(GL_CURRENT_PROGRAM,     &prevProgram);
+  glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &prevVao);
+  GLboolean prevScissor = glIsEnabled(GL_SCISSOR_TEST);
+  GLboolean prevBlend   = glIsEnabled(GL_BLEND);
+  GLint prevBlendSrcRGB = 0, prevBlendDstRGB = 0;
+  GLint prevBlendSrcA   = 0, prevBlendDstA   = 0;
+  glGetIntegerv(GL_BLEND_SRC_RGB,   &prevBlendSrcRGB);
+  glGetIntegerv(GL_BLEND_DST_RGB,   &prevBlendDstRGB);
+  glGetIntegerv(GL_BLEND_SRC_ALPHA, &prevBlendSrcA);
+  glGetIntegerv(GL_BLEND_DST_ALPHA, &prevBlendDstA);
+
+  glBindFramebuffer(GL_FRAMEBUFFER, target.fbo);
+  glViewport(0, 0, target.W, target.H);
+  glDisable(GL_SCISSOR_TEST);
+  // Clear to the canvas background so semi-transparent strokes composite
+  // against it ONCE inside the FBO.  Then ImGui::Image samples a fully
+  // opaque texture and the final composite is a no-op, matching the
+  // immediate-mode result.  (Compositing into a transparent FBO and again
+  // through ImGui's blend would darken / desaturate translucent pens.)
+  glClearColor(245.0f / 255.0f, 245.0f / 255.0f, 240.0f / 255.0f, 1.0f);
+  glClear(GL_COLOR_BUFFER_BIT);
+  glEnable(GL_BLEND);
+  // Standard alpha blend for RGB; keep destination alpha at the cleared
+  // value (1.0) regardless of incoming src.a.  Otherwise translucent
+  // strokes drop the FBO pixel's alpha below 1, and ImGui::Image's
+  // src*a + dst*(1-a) composite then mixes in another helping of the
+  // canvas background — desaturating the stroke colour.  With dst.a
+  // fixed at 1, the second composite degenerates to a copy.
+  glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA,
+                      GL_ZERO,      GL_ONE);
+
+  const float cosR = cosf(p.rotation);
+  const float sinR = sinf(p.rotation);
+
+  // Configure both renderers for canvas-local rendering into the FBO:
+  // origin (0,0) and a "display" matching the FBO size, with pan/scale
+  // multiplied by fbScale so the shader's logical-pixel formula lands
+  // pixels at FBO coordinates (which are framebuffer pixels).  The
+  // fragment shader's uHalfWidth (computed inside StrokeRenderer::draw
+  // from `scale`) inherits the same scaling and produces correct
+  // line thickness in FB pixels.
+  if (strokeRenderer.valid) {
+    strokeRenderer.origin = {0.f, 0.f};
+    strokeRenderer.cW     = static_cast<float>(target.W);
+    strokeRenderer.cH     = static_cast<float>(target.H);
+    strokeRenderer.dispX  = 0.f;
+    strokeRenderer.dispY  = 0.f;
+    strokeRenderer.dispW  = static_cast<float>(target.W);
+    strokeRenderer.dispH  = static_cast<float>(target.H);
+    strokeRenderer.scale  = p.scale * fbScale;
+    strokeRenderer.cosR   = cosR;
+    strokeRenderer.sinR   = sinR;
+    strokeRenderer.panX   = p.panX  * fbScale;
+    strokeRenderer.panY   = p.panY  * fbScale;
+    strokeRenderer.pens   = p.pens;
+    strokeRenderer.fbH    = target.H;
+    strokeRenderer.draw();
+  }
+
+  if (p.showPenUp && penUpRenderer.valid && penUpRenderer.vertexCount > 0) {
+    float t = p.penUpThreshold * kHpglUnitsPerCm;
+    penUpRenderer.origin      = {0.f, 0.f};
+    penUpRenderer.cW          = static_cast<float>(target.W);
+    penUpRenderer.cH          = static_cast<float>(target.H);
+    penUpRenderer.thresholdSq = t * t;
+    penUpRenderer.dispX       = 0.f;
+    penUpRenderer.dispY       = 0.f;
+    penUpRenderer.dispW       = static_cast<float>(target.W);
+    penUpRenderer.dispH       = static_cast<float>(target.H);
+    penUpRenderer.scale       = p.scale * fbScale;
+    penUpRenderer.cosR        = cosR;
+    penUpRenderer.sinR        = sinR;
+    penUpRenderer.panX        = p.panX  * fbScale;
+    penUpRenderer.panY        = p.panY  * fbScale;
+    penUpRenderer.fbH         = target.H;
+    penUpRenderer.draw();
+  }
+
+  // Restore GL state.
+  glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevFbo));
+  glViewport(prevVp[0], prevVp[1], prevVp[2], prevVp[3]);
+  glUseProgram(static_cast<GLuint>(prevProgram));
+  glBindVertexArray(static_cast<GLuint>(prevVao));
+  if (prevScissor) glEnable(GL_SCISSOR_TEST); else glDisable(GL_SCISSOR_TEST);
+  if (!prevBlend)  glDisable(GL_BLEND);
+  glBlendFuncSeparate(prevBlendSrcRGB, prevBlendDstRGB,
+                      prevBlendSrcA,   prevBlendDstA);
 }

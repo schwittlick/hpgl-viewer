@@ -94,16 +94,58 @@ struct StrokeRenderer {
 // ImGui draw-list callback that issues the GPU stroke draw calls.
 void strokeRenderCallback(const ImDrawList*, const ImDrawCmd *cmd);
 
+// ── Off-screen canvas (FBO cache) ─────────────────────────────────────────────
+//
+// Caches the GPU-rendered scene (strokes + pen-up moves) into a texture so
+// the same content can be sampled back via ImGui::Image when canvas state
+// is unchanged.  The CPU-side overlays (grid, dot circles, FPS box) keep
+// running through the regular ImGui draw list each frame.
+struct CanvasFbo {
+  GLuint fbo = 0;
+  GLuint tex = 0;
+  int    W   = 0;
+  int    H   = 0;
+  bool   valid = false;
+
+  void init();
+  void resize(int newW, int newH);
+  void destroy();
+};
+
 // ── Scene drawing ─────────────────────────────────────────────────────────────
 
 struct DrawParams {
   float panX, panY, scale, rotation;
   bool  showPenUp;
   float penUpThreshold; // cm
-  const PenStyle *pens; // pointer to array of 8
+  const PenStyle *pens; // pointer to array of 10
   bool  showCoords = false;
+  // When non-zero, drawHpgl skips the GPU stroke + pen-up callbacks and
+  // instead samples this OpenGL texture between the grid and the CPU-drawn
+  // dot circles, so z-order matches the immediate path.
+  GLuint fboTex = 0;
 };
 
 void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW, float canvasH,
               const HpglDoc &doc, const DrawParams &p,
               PenUpRenderer &penUpRenderer, StrokeRenderer &strokeRenderer);
+
+// Render the cached scene (GPU strokes + pen-up moves) into target.
+// Restores the previously-bound framebuffer and viewport on return.
+//
+// fbScale is the framebuffer-pixels-per-logical-pixel ratio (1.0 on a
+// non-HiDPI display, typically 2.0 on a 2x display).  The caller is
+// expected to size target.W/target.H in framebuffer pixels (i.e.
+// canvas_logical_W * fbScale); this function then scales pan, zoom, and
+// line-thickness uniforms by fbScale so the shader projects HPGL into
+// FBO pixels 1:1.  This matters because ImGui::Image samples the
+// texture at framebuffer-pixel resolution — a logical-sized FBO would
+// otherwise be bilinearly upscaled, blurring strokes and dulling
+// colours.  Anisotropic fbScale is not supported (passed value applies
+// to both axes).
+void renderSceneToFbo(CanvasFbo &target,
+                      const HpglDoc &doc,
+                      const DrawParams &p,
+                      PenUpRenderer &penUpRenderer,
+                      StrokeRenderer &strokeRenderer,
+                      float fbScale = 1.0f);
