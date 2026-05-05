@@ -60,6 +60,10 @@ DotsLinesSplit splitDotsAndLines(const HpglDoc &src);
 std::string dotsPath(const std::string &src);
 std::string linesPath(const std::string &src);
 
+// Derive the output path for a cross-layer merge: inserts "_merged" before
+// the last extension (or appends "_merged.hpgl" if there is no extension).
+std::string mergedPath(const std::string &src);
+
 // Derive the output path for an exported fix: inserts "_fixed" before the
 // last extension, or appends "_fixed.hpgl" if there is no extension.
 std::string fixedPath(const std::string &src);

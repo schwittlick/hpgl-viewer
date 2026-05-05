@@ -269,6 +269,35 @@ static void applyMerge() {
   g_fixStatus = "Merged (not yet saved)";
 }
 
+// Concatenate every loaded layer into a single layer, in current order.  The
+// resulting layer's path is the first layer's path with a "_merged" suffix.
+static void applyFlattenLayers() {
+  if (g_layers.size() < 2) return;
+  HpglDoc combined;
+  for (const Layer &l : g_layers) {
+    for (const auto &s : l.doc.strokes) combined.strokes.push_back(s);
+    if (!l.doc.empty()) {
+      combined.minX = std::min(combined.minX, l.doc.minX);
+      combined.minY = std::min(combined.minY, l.doc.minY);
+      combined.maxX = std::max(combined.maxX, l.doc.maxX);
+      combined.maxY = std::max(combined.maxY, l.doc.maxY);
+    }
+  }
+
+  Layer merged;
+  merged.path = mergedPath(g_layers.front().path);
+  merged.doc = std::move(combined);
+  merged.hasFixed = true;
+
+  g_layers.clear();
+  g_layers.push_back(std::move(merged));
+  g_activeLayer = 0;
+  rebuildPenUpRenderer();
+  refreshDocStats();
+  g_fitRequested = true;
+  g_fixStatus = "Flattened (not yet saved)";
+}
+
 static void applySplit() {
   if (g_activeLayer < 0 || g_activeLayer >= static_cast<int>(g_layers.size()))
     return;
@@ -424,6 +453,11 @@ int main(int argc, char** argv) {
     ImGui::SameLine();
     if (ImGui::Button("Add"))
       enqueueLoad(g_filePathBuf, /*replace=*/false);
+
+    ImGui::BeginDisabled(g_layers.size() < 2);
+    if (ImGui::Button("Flatten all layers into one"))
+      applyFlattenLayers();
+    ImGui::EndDisabled();
 
     for (int i = 0; i < static_cast<int>(g_layers.size()); ++i) {
       ImGui::PushID(i);

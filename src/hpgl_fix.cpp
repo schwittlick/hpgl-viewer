@@ -235,8 +235,9 @@ static std::string suffixPath(const std::string &src, const std::string &suffix)
   return src.substr(0, dot) + suffix + src.substr(dot);
 }
 
-std::string dotsPath(const std::string &src)  { return suffixPath(src, "_dots"); }
-std::string linesPath(const std::string &src) { return suffixPath(src, "_lines"); }
+std::string dotsPath(const std::string &src)   { return suffixPath(src, "_dots"); }
+std::string linesPath(const std::string &src)  { return suffixPath(src, "_lines"); }
+std::string mergedPath(const std::string &src) { return suffixPath(src, "_merged"); }
 
 bool exportHpgl(const HpglDoc &doc, const std::string &path, int vsValue) {
   FILE *f = fopen(path.c_str(), "w");
