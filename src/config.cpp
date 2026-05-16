@@ -12,6 +12,13 @@ std::filesystem::path configPath() {
   return base / "hpgl-viewer" / "config";
 }
 
+std::string imguiIniPath() {
+  fs::path path = configPath().parent_path() / "imgui.ini";
+  std::error_code ec;
+  fs::create_directories(path.parent_path(), ec);
+  return path.string();
+}
+
 std::string configLoad(const std::string &key) {
   std::ifstream f(configPath());
   std::string line;

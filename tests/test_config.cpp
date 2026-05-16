@@ -116,6 +116,20 @@ static void test_config_path_uses_xdg_config_home() {
   REQUIRE(p.string().find("/tmp/my_xdg") == 0);
 }
 
+// ── imguiIniPath ──────────────────────────────────────────────────────────────
+
+static void test_imgui_ini_path_in_config_dir() {
+  setenv("XDG_CONFIG_HOME", "/tmp/my_xdg_ini", 1);
+  std::string p = imguiIniPath();
+  fs::path expectedDir = configPath().parent_path();
+  unsetenv("XDG_CONFIG_HOME");
+  fs::remove_all("/tmp/my_xdg_ini");
+  // Lives next to the config file, named imgui.ini, under XDG_CONFIG_HOME.
+  REQUIRE(p.find("/tmp/my_xdg_ini") == 0);
+  REQUIRE(fs::path(p).filename() == "imgui.ini");
+  REQUIRE(fs::path(p).parent_path() == expectedDir);
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 int main() {
@@ -132,6 +146,7 @@ int main() {
   run("value with equals sign",          test_value_with_equals_sign);
   run("overwrite yields single value",   test_load_after_overwrite_returns_single_value);
   run("configPath uses XDG_CONFIG_HOME", test_config_path_uses_xdg_config_home);
+  run("imguiIniPath in config dir",      test_imgui_ini_path_in_config_dir);
 
   printf("\n%d/%d passed\n", g_pass, g_pass + g_fail);
   return g_fail > 0 ? 1 : 0;

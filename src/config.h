@@ -6,6 +6,10 @@
 // Returns the path to the persistent config file.
 std::filesystem::path configPath();
 
+// Returns the path for the ImGui layout file (imgui.ini), in the same
+// per-user directory as the config file.  Creates the directory if needed.
+std::string imguiIniPath();
+
 // Reads the value for key from the config file. Returns "" if not found.
 std::string configLoad(const std::string &key);
 

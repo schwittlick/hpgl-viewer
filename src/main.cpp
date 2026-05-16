@@ -348,6 +348,13 @@ int main(int argc, char** argv) {
   ImGuiIO &io = ImGui::GetIO();
   io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
+  // Persist the layout to a dedicated per-user path.  ImGui defaults to an
+  // "imgui.ini" in the current working directory, which means the layout
+  // depends on where the app is launched from and can be clobbered by other
+  // ImGui apps writing their own imgui.ini to the same directory.
+  static std::string iniPath = imguiIniPath();
+  io.IniFilename = iniPath.c_str();
+
   ImGui::StyleColorsDark();
   ImGui_ImplGlfw_InitForOpenGL(window, true);
   ImGui_ImplOpenGL3_Init("#version 330");
@@ -372,10 +379,11 @@ int main(int argc, char** argv) {
   });
 
   while (!glfwWindowShouldClose(window)) {
-    // While a load job is in flight, poll at ~30 Hz so the progress bar
-    // animates smoothly even though no UI events are arriving.
-    if (g_loadJob) glfwWaitEventsTimeout(0.033);
-    else           glfwWaitEvents();
+    // Render continuously so the canvas tracks window resizes live and load
+    // progress animates.  glfwSwapBuffers (vsync) throttles the loop to the
+    // display refresh rate, and the cached canvas FBO keeps idle frames
+    // cheap — non-interactive frames just sample the cached texture.
+    glfwPollEvents();
 
     if (installCompletedJob()) {
       rebuildPenUpRenderer();
@@ -770,7 +778,8 @@ int main(int argc, char** argv) {
 
     // Stats overlay — top-right corner of canvas
     {
-      char lines[4][48];
+      constexpr int kNumLines = 4;
+      char lines[kNumLines][48];
       snprintf(lines[0], sizeof(lines[0]), "%.0f FPS", io.Framerate);
       snprintf(lines[1], sizeof(lines[1]), "%d paths", g_stats.numPaths);
       snprintf(lines[2], sizeof(lines[2]), "pd %.2f m", g_stats.penDownMm / 1000.0f);
@@ -781,12 +790,12 @@ int main(int argc, char** argv) {
 
       float maxW = 0;
       for (auto &l : lines) maxW = std::max(maxW, ImGui::CalcTextSize(l).x);
-      float boxH = 4 * step + pad;
+      float boxH = kNumLines * step + pad;
       ImVec2 boxMax = {canvasPos.x + cW - pad, canvasPos.y + pad + boxH};
       ImVec2 boxMin = {boxMax.x - maxW - pad,  canvasPos.y + pad};
       dl->AddRectFilled(boxMin, boxMax, IM_COL32(0, 0, 0, 140), 4.0f);
 
-      for (int li = 0; li < 4; ++li) {
+      for (int li = 0; li < kNumLines; ++li) {
         ImVec2 sz  = ImGui::CalcTextSize(lines[li]);
         ImVec2 pos = {canvasPos.x + cW - sz.x - pad * 1.5f,
                       canvasPos.y + pad * 1.5f + li * step};
