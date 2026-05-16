@@ -16,6 +16,9 @@ struct Vec2 {
 struct Stroke {
   std::vector<Vec2> points;
   int pen = 1;
+  // Source layer index, stamped when visible layers are merged for rendering.
+  // Lets the renderer apply a per-layer solid-colour override on top of pens.
+  int layer = 0;
   // Per-stroke AABB in HPGL units, populated by HpglParser.
   Vec2 bboxMin{ 1e30f,  1e30f};
   Vec2 bboxMax{-1e30f, -1e30f};

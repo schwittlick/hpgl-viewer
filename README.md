@@ -18,6 +18,7 @@ A lightweight HPGL file viewer built with Dear ImGui + OpenGL3 + GLFW.
 - Pan (left-drag or middle-drag), zoom to cursor (scroll wheel), rotate 90° (`R`)
 - Fit-to-window (`C`), fullscreen (`F`)
 - Per-pen color (color picker), line thickness (dropdown), and opacity (transparency slider)
+- Per-layer solid color: each layer row has a solid-colour toggle, an editable colour swatch, and a line-thickness dropdown, so a layer can override the pen palette and render every stroke in one colour + width — useful for compositing multiple single-color files (e.g. a dots layer and a lines layer at different widths). Pen-mode layers keep using the shared pen palette. The override is applied to PNG export too
 - Plotter coordinate tooltip on hover
 - Pen-up move visualisation: green = short, orange = long but outside zone, red = will be fixed
 - Pen-up smear fix: inserts pen-8 waypoint dots along long pen-up moves, exported as a separate `_fixed.hpgl` file
@@ -28,8 +29,8 @@ A lightweight HPGL file viewer built with Dear ImGui + OpenGL3 + GLFW.
 - Split long strokes: breaks any pen-down stroke whose polyline length exceeds **Max stroke length** into multiple shorter consecutive strokes (pen lifts and drops back down at the split point) — useful for ink-flow on long continuous lines
 - Simplify collinear points: removes redundant interior points within a stroke — a middle point is dropped when its perpendicular distance to the segment between its neighbours is within **Collinear tol** (mm) AND it projects between them (so back-and-forth on the same axis is preserved)
 - Export dots + lines to separate HPGL files: writes `<name>_dots.hpgl` (every single-point or all-coincident-point stroke) and `<name>_lines.hpgl` (everything else) — useful for plotting dots and lines with a different pen on the plotter
-- PNG export at physical DPI
-- FBO-cached canvas: GPU strokes + pen-up moves render once into an off-screen framebuffer and are sampled back via `ImGui::Image`; the cache is invalidated only when canvas-affecting state changes (pan/zoom/rotation, doc, pen colors/widths, threshold, canvas size) so panel-only interactions stay snappy on heavy files
+- PNG export at 600 DPI (sized from the document's physical dimensions)
+- FBO-cached canvas: GPU strokes + pen-up moves render once into an off-screen framebuffer and are sampled back via `ImGui::Image`; the cache is invalidated only when canvas-affecting state changes (pan/zoom/rotation, doc, pen colors/widths, layer colors, threshold, canvas size) so panel-only interactions stay snappy on heavy files
 
 ## Keyboard shortcuts
 

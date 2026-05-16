@@ -58,8 +58,10 @@ static std::string openFileDialog() {
 struct Layer {
   HpglDoc     doc;
   std::string path;
-  bool        visible  = true;
-  bool        hasFixed = false;
+  bool        visible    = true;
+  bool        hasFixed   = false;
+  bool        solidColor = false; // override the pen palette with one colour
+  PenStyle    solid;              // colour + thickness used when solidColor
 };
 
 static std::vector<Layer> g_layers;
@@ -92,6 +94,15 @@ static int g_windowedW = 1400, g_windowedH = 900;
 // pen styles (up to 10 pens)
 static PenStyle g_pens[10];
 
+// Per-layer colour overrides for the renderer, rebuilt from g_layers each frame.
+static std::vector<LayerStyle> g_layerStyles;
+
+// Standard pen-width presets, shared by the pen-style and layer-style UIs.
+static const float kPenWidths[]      = {0.3f, 0.4f, 0.5f, 0.6f, 0.8f, 1.0f};
+static const char *kPenWidthLabels[] = {"0.3 mm", "0.4 mm", "0.5 mm",
+                                        "0.6 mm", "0.8 mm", "1.0 mm"};
+static constexpr int kNumWidths = 6;
+
 static std::string g_fixStatus;
 static int g_vsValue = 1; // velocity select for HPGL export (1–8)
 
@@ -106,6 +117,7 @@ static HpglDoc mergedDoc() {
     if (!l.visible) continue;
     for (const auto &s : l.doc.strokes) {
       m.strokes.push_back(s);
+      m.strokes.back().layer = li; // stamp source layer for per-layer colouring
     }
     if (!l.doc.empty()) {
       m.minX = std::min(m.minX, l.doc.minX);
@@ -229,6 +241,9 @@ static bool installCompletedJob() {
   Layer layer;
   layer.path = g_loadJob->path;
   layer.doc  = std::move(g_loadJob->result);
+  // Seed the solid-colour override with a distinct palette colour so a layer
+  // is ready to stand out the moment the override is enabled.
+  layer.solid.color = g_pens[g_layers.size() % 10].color;
   g_layers.push_back(std::move(layer));
   g_activeLayer = static_cast<int>(g_layers.size()) - 1;
   g_fitRequested = true;
@@ -486,10 +501,34 @@ int main(int argc, char** argv) {
       }
       ImGui::SameLine();
 
-      // Color swatch — shows the pen color assigned to this layer by index
-      ImGui::ColorButton("##col", g_pens[i % 10].color,
-                         ImGuiColorEditFlags_NoTooltip |
-                         ImGuiColorEditFlags_NoBorder, {12, 12});
+      // Solid-colour toggle — when on, the whole layer renders in the swatch
+      // colour instead of the HPGL pen palette.  Per-row so every layer is
+      // editable without first making it the active layer.
+      ImGui::Checkbox("##solid", &l.solidColor);
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Solid colour (override pens)");
+      ImGui::SameLine();
+
+      // Colour swatch + absolute thickness — editable; greyed out while the
+      // layer uses the pen palette.
+      ImGui::BeginDisabled(!l.solidColor);
+      ImGui::ColorEdit4("##col", &l.solid.color.x,
+                        ImGuiColorEditFlags_NoInputs |
+                            ImGuiColorEditFlags_NoLabel |
+                            ImGuiColorEditFlags_AlphaBar);
+      ImGui::SameLine();
+      int tsel = -1;
+      for (int j = 0; j < kNumWidths; ++j)
+        if (fabsf(l.solid.thickness - kPenWidths[j]) < 0.01f) { tsel = j; break; }
+      ImGui::SetNextItemWidth(64);
+      if (ImGui::BeginCombo("##thick",
+                            tsel >= 0 ? kPenWidthLabels[tsel] : "custom")) {
+        for (int j = 0; j < kNumWidths; ++j)
+          if (ImGui::Selectable(kPenWidthLabels[j], tsel == j))
+            l.solid.thickness = kPenWidths[j];
+        ImGui::EndCombo();
+      }
+      ImGui::EndDisabled();
       ImGui::SameLine();
 
       // Layer name — click to activate
@@ -591,7 +630,9 @@ int main(int argc, char** argv) {
                       .replace_extension(".png").string();
       else
         pngPath = "export.png";
-      if (exportPng(g_mergedDoc, g_pens, pngPath))
+      if (exportPng(g_mergedDoc, g_pens, pngPath, 600.f,
+                    g_layerStyles.data(),
+                    static_cast<int>(g_layerStyles.size())))
         g_fixStatus = "PNG saved: " + pngPath;
       else
         g_fixStatus = "PNG export failed: " + pngPath;
@@ -624,10 +665,6 @@ int main(int argc, char** argv) {
     }
 
     ImGui::SeparatorText("Pen Styles");
-    static const float kPenWidths[]      = {0.3f, 0.4f, 0.5f, 0.6f, 0.8f, 1.0f};
-    static const char *kPenWidthLabels[] = {"0.3 mm", "0.4 mm", "0.5 mm",
-                                            "0.6 mm", "0.8 mm", "1.0 mm"};
-    constexpr int kNumWidths = 6;
     for (int i = 0; i < 10; ++i) {
       ImGui::PushID(i);
       char label[16];
@@ -761,8 +798,23 @@ int main(int argc, char** argv) {
       hash = h64(hash, bits(g_pens[i].thickness));
     }
 
+    // Per-layer colour overrides for the renderer, indexed by layer.
+    g_layerStyles.resize(g_layers.size());
+    for (size_t i = 0; i < g_layers.size(); ++i) {
+      g_layerStyles[i].solid = g_layers[i].solidColor;
+      g_layerStyles[i].style = g_layers[i].solid;
+      const LayerStyle &ls = g_layerStyles[i];
+      hash = h64(hash, ls.solid ? 1ull : 0ull);
+      hash = h64(hash, bits(ls.style.color.x));
+      hash = h64(hash, bits(ls.style.color.y));
+      hash = h64(hash, bits(ls.style.color.z));
+      hash = h64(hash, bits(ls.style.color.w));
+      hash = h64(hash, bits(ls.style.thickness));
+    }
+
     DrawParams dp{g_panX, g_panY, g_scale, g_rotation,
                   g_showPenUp, g_penUpThreshold, g_pens,
+                  g_layerStyles.data(), static_cast<int>(g_layerStyles.size()),
                   g_showCoords,
                   /*fboTex=*/g_useFboCache ? g_canvasFbo.tex : 0u};
 

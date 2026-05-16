@@ -89,6 +89,29 @@ static void testWidthDeterminesOutputSize() {
   remove(path.c_str());
 }
 
+static void testLayerSolidColorOverride() {
+  // Two strokes from two layers; layer 1 carries a solid-colour override.
+  HpglDoc doc;
+  doc.minX = 0; doc.minY = 0; doc.maxX = 4000; doc.maxY = 4000;
+  Stroke s0{{{0, 0}, {4000, 0}}, 1};       s0.layer = 0;
+  Stroke s1{{{0, 2000}, {4000, 2000}}, 1}; s1.layer = 1;
+  doc.strokes.push_back(s0);
+  doc.strokes.push_back(s1);
+
+  PenStyle pens[10];
+  for (auto &p : pens) p = defaultPens();
+
+  LayerStyle layers[2];
+  layers[0].solid = false;
+  layers[1].solid = true;
+  layers[1].style.color = {1.0f, 0.0f, 0.0f, 1.0f};
+
+  std::string path = tmpPath("_layer.png");
+  bool ok = exportPng(doc, pens, path, 200, layers, 2);
+  REQUIRE(ok);
+  remove(path.c_str());
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 int main() {
@@ -97,4 +120,5 @@ int main() {
   run("unwritable path returns false", testUnwritablePathReturnsFalse);
   run("multiple strokes",              testMultipleStrokes);
   run("small width does not crash",    testWidthDeterminesOutputSize);
+  run("layer solid colour override",   testLayerSolidColorOverride);
 }

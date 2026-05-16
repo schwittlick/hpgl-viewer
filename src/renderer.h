@@ -23,6 +23,17 @@ struct PenStyle {
 // Fill pens[0..9] with default colours.
 void initPenColors(PenStyle pens[10]);
 
+// ── Layer styling ─────────────────────────────────────────────────────────────
+//
+// A layer may override the per-pen palette with a single solid colour.  When
+// `solid` is true, every stroke originating from that layer is drawn with
+// `style` regardless of its HPGL pen index; otherwise the global pen palette
+// applies as usual.
+struct LayerStyle {
+  bool     solid = false;
+  PenStyle style;
+};
+
 // ── Coordinate helpers ────────────────────────────────────────────────────────
 
 // Undo canvas rotation around its centre: screen-relative → pre-rotation coords.
@@ -69,8 +80,10 @@ struct StrokeRenderer {
   GLuint vao = 0, vbo = 0, program = 0;
   bool   valid = false;
 
-  struct PenRange { int offset = 0; int count = 0; };
-  PenRange ranges[10];
+  // One contiguous VBO range per (layer, pen) pair that has geometry.  draw()
+  // resolves each bucket's colour from the layer override or the pen palette.
+  struct StrokeBucket { int layer = 0; int pen = 0; int offset = 0; int count = 0; };
+  std::vector<StrokeBucket> buckets;
 
   // Per-frame context — set before the ImGui draw callback fires.
   ImVec2 origin{};
@@ -79,7 +92,9 @@ struct StrokeRenderer {
   float  scale = 1.0f, cosR = 1.0f, sinR = 0.0f;
   float  panX  = 0.0f, panY = 0.0f;
   int    fbH   = 0;
-  const PenStyle *pens = nullptr;
+  const PenStyle   *pens        = nullptr;
+  const LayerStyle *layerStyles = nullptr; // indexed by Stroke::layer
+  int               layerCount  = 0;
 
   GLint uScale=-1, uCosR=-1, uSinR=-1, uPanX=-1, uPanY=-1;
   GLint uOriginX=-1, uOriginY=-1, uCanvasW=-1, uCanvasH=-1;
@@ -119,6 +134,8 @@ struct DrawParams {
   bool  showPenUp;
   float penUpThreshold; // cm
   const PenStyle *pens; // pointer to array of 10
+  const LayerStyle *layerStyles = nullptr; // per-layer overrides, indexed by layer
+  int   layerCount = 0;
   bool  showCoords = false;
   // When non-zero, drawHpgl skips the GPU stroke + pen-up callbacks and
   // instead samples this OpenGL texture between the grid and the CPU-drawn

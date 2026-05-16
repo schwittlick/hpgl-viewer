@@ -354,11 +354,21 @@ void StrokeRenderer::upload(const HpglDoc &doc) {
   // Vertex layout: (pos.x, pos.y, p0.x, p0.y, p1.x, p1.y, side) — 7 floats per vertex.
   // p0/p1 are the canonical segment endpoints (same for all 6 vertices of a segment).
   // Skip single-point dot strokes (handled by CPU dot renderer).
-  std::vector<float> penData[10];
+  //
+  // Geometry is grouped per (layer, pen) so draw() can pick the colour from
+  // either the global pen palette or a layer's solid-colour override.
+  buckets.clear();
+  int nLayers = 1;
+  for (const auto &stroke : doc.strokes)
+    nLayers = std::max(nLayers, stroke.layer + 1);
+
+  std::vector<std::vector<float>> groups((size_t)nLayers * 10);
   for (const auto &stroke : doc.strokes) {
     if (stroke.points.size() < 2) continue;
     if (stroke.points.size() == 2 && stroke.points[0] == stroke.points[1]) continue;
     int pi = std::max(0, std::min(stroke.pen - 1, 9));
+    int li = std::max(0, std::min(stroke.layer, nLayers - 1));
+    std::vector<float> &out = groups[(size_t)li * 10 + pi];
     for (size_t i = 0; i + 1 < stroke.points.size(); ++i) {
       float x0 = stroke.points[i].x,   y0 = stroke.points[i].y;
       float x1 = stroke.points[i+1].x, y1 = stroke.points[i+1].y;
@@ -375,18 +385,26 @@ void StrokeRenderer::upload(const HpglDoc &doc) {
       };
       for (auto &v : verts)
         for (float f : v)
-          penData[pi].push_back(f);
+          out.push_back(f);
     }
   }
 
-  // Concatenate into one VBO, record per-pen vertex offset/count.
+  // Concatenate non-empty groups into one VBO, recording each bucket's range.
   std::vector<float> vboData;
   int vertOffset = 0;
-  for (int i = 0; i < 10; ++i) {
-    ranges[i].offset = vertOffset;
-    ranges[i].count  = (int)(penData[i].size() / 7); // 7 floats per vertex
-    vboData.insert(vboData.end(), penData[i].begin(), penData[i].end());
-    vertOffset += ranges[i].count;
+  for (int li = 0; li < nLayers; ++li) {
+    for (int pi = 0; pi < 10; ++pi) {
+      const std::vector<float> &g = groups[(size_t)li * 10 + pi];
+      if (g.empty()) continue;
+      StrokeBucket b;
+      b.layer  = li;
+      b.pen    = pi;
+      b.offset = vertOffset;
+      b.count  = (int)(g.size() / 7); // 7 floats per vertex
+      vboData.insert(vboData.end(), g.begin(), g.end());
+      vertOffset += b.count;
+      buckets.push_back(b);
+    }
   }
 
   glBindVertexArray(vao);
@@ -425,12 +443,16 @@ void StrokeRenderer::draw() const {
   glUniform1f(uDispH,   dispH);
 
   glBindVertexArray(vao);
-  for (int i = 0; i < 10; ++i) {
-    if (ranges[i].count == 0) continue;
-    const auto &c = pens[i].color;
+  for (const StrokeBucket &b : buckets) {
+    if (b.count == 0) continue;
+    // Layer solid-colour override takes precedence over the pen palette.
+    const PenStyle *st = &pens[b.pen];
+    if (layerStyles && b.layer < layerCount && layerStyles[b.layer].solid)
+      st = &layerStyles[b.layer].style;
+    const auto &c = st->color;
     glUniform4f(uColor, c.x, c.y, c.z, c.w);
-    glUniform1f(uHalfWidth, pens[i].thickness * kHpglUnitsPerMm * scale * 0.5f);
-    glDrawArrays(GL_TRIANGLES, ranges[i].offset, ranges[i].count);
+    glUniform1f(uHalfWidth, st->thickness * kHpglUnitsPerMm * scale * 0.5f);
+    glDrawArrays(GL_TRIANGLES, b.offset, b.count);
   }
   glBindVertexArray(0);
 }
@@ -583,6 +605,8 @@ void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW, float canvasH,
     strokeRenderer.panX   = p.panX;
     strokeRenderer.panY   = p.panY;
     strokeRenderer.pens   = p.pens;
+    strokeRenderer.layerStyles = p.layerStyles;
+    strokeRenderer.layerCount  = p.layerCount;
     dl->AddCallback(strokeRenderCallback, &strokeRenderer);
     dl->AddCallback(ImDrawCallback_ResetRenderState, nullptr);
   }
@@ -607,8 +631,12 @@ void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW, float canvasH,
       if (stroke.bboxMax.x < visMinX || stroke.bboxMin.x > visMaxX ||
           stroke.bboxMax.y < visMinY || stroke.bboxMin.y > visMaxY) continue;
       int pi = std::max(0, std::min(stroke.pen - 1, 9));
-      ImU32 col = ImGui::ColorConvertFloat4ToU32(p.pens[pi].color);
-      float screen_thick = std::max(1.0f, p.pens[pi].thickness * kHpglUnitsPerMm * p.scale);
+      const PenStyle *st = &p.pens[pi];
+      if (p.layerStyles && stroke.layer < p.layerCount &&
+          p.layerStyles[stroke.layer].solid)
+        st = &p.layerStyles[stroke.layer].style;
+      ImU32 col = ImGui::ColorConvertFloat4ToU32(st->color);
+      float screen_thick = std::max(1.0f, st->thickness * kHpglUnitsPerMm * p.scale);
       ImVec2 pt = xfPoint(stroke.points[0].x, stroke.points[0].y, origin,
                           p.panX, p.panY, p.scale, canvasW, canvasH, cosR, sinR);
       dl->AddCircleFilled(pt, screen_thick * 0.5f, col);
@@ -750,6 +778,8 @@ void renderSceneToFbo(CanvasFbo &target,
     strokeRenderer.panX   = p.panX  * fbScale;
     strokeRenderer.panY   = p.panY  * fbScale;
     strokeRenderer.pens   = p.pens;
+    strokeRenderer.layerStyles = p.layerStyles;
+    strokeRenderer.layerCount  = p.layerCount;
     strokeRenderer.fbH    = target.H;
     strokeRenderer.draw();
   }

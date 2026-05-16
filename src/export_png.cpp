@@ -91,7 +91,8 @@ static bool writePng(const std::string &path, const std::vector<uint8_t> &pixels
 // ── Public API ────────────────────────────────────────────────────────────────
 
 bool exportPng(const HpglDoc &doc, const PenStyle pens[10],
-               const std::string &path, float dpi) {
+               const std::string &path, float dpi,
+               const LayerStyle *layerStyles, int layerCount) {
   if (doc.empty()) return false;
 
   float docW = doc.maxX - doc.minX;
@@ -121,14 +122,19 @@ bool exportPng(const HpglDoc &doc, const PenStyle pens[10],
     if (stroke.points.empty()) continue;
 
     int pi = std::max(0, std::min(stroke.pen - 1, 9));
+    // A layer's solid-colour override takes precedence over the pen palette.
+    const PenStyle *st = &pens[pi];
+    if (layerStyles && stroke.layer < layerCount &&
+        layerStyles[stroke.layer].solid)
+      st = &layerStyles[stroke.layer].style;
     // Convert ImVec4 colour [0,1] → [0,255]
-    uint8_t red = static_cast<uint8_t>(pens[pi].color.x * 255.f);
-    uint8_t grn = static_cast<uint8_t>(pens[pi].color.y * 255.f);
-    uint8_t blu = static_cast<uint8_t>(pens[pi].color.z * 255.f);
-    float   alp = pens[pi].color.w;
+    uint8_t red = static_cast<uint8_t>(st->color.x * 255.f);
+    uint8_t grn = static_cast<uint8_t>(st->color.y * 255.f);
+    uint8_t blu = static_cast<uint8_t>(st->color.z * 255.f);
+    float   alp = st->color.w;
     // Pen radius in pixels: thickness [mm] × (scale [px/HPGL] × kHpglUnitsPerMm)
     int radius = std::max(1, static_cast<int>(
-        roundf(pens[pi].thickness * scale * kHpglUnitsPerMm * 0.5f)));
+        roundf(st->thickness * scale * kHpglUnitsPerMm * 0.5f)));
 
     auto toScreen = [&](const Vec2 &v) -> std::pair<float, float> {
       return {v.x * scale + panX, -v.y * scale + panY};
