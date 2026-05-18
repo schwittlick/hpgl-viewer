@@ -356,7 +356,13 @@ int main(int argc, char** argv) {
     return 1;
   }
   glfwMakeContextCurrent(window);
-  glfwSwapInterval(1);
+  // Swap interval 0 (no blocking vsync).  On Wayland a vsync-blocked
+  // glfwSwapBuffers waits indefinitely for a frame callback that the
+  // compositor stops sending while the window is occluded (hidden
+  // workspace, display asleep) — that freezes the event loop and the
+  // compositor flags the app as unresponsive.  The loop is paced by
+  // glfwWaitEventsTimeout below instead.
+  glfwSwapInterval(0);
 
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
@@ -395,10 +401,11 @@ int main(int argc, char** argv) {
 
   while (!glfwWindowShouldClose(window)) {
     // Render continuously so the canvas tracks window resizes live and load
-    // progress animates.  glfwSwapBuffers (vsync) throttles the loop to the
-    // display refresh rate, and the cached canvas FBO keeps idle frames
-    // cheap — non-interactive frames just sample the cached texture.
-    glfwPollEvents();
+    // progress animates.  glfwWaitEventsTimeout paces the loop to ~60 Hz
+    // while still returning immediately on input/ping events, and the
+    // cached canvas FBO keeps idle frames cheap — non-interactive frames
+    // just sample the cached texture.
+    glfwWaitEventsTimeout(1.0 / 60.0);
 
     if (installCompletedJob()) {
       rebuildPenUpRenderer();
