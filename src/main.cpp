@@ -521,7 +521,7 @@ int main(int argc, char** argv) {
       for (int j = 0; j < kNumWidths; ++j)
         if (fabsf(l.solid.thickness - kPenWidths[j]) < 0.01f) { tsel = j; break; }
       ImGui::SetNextItemWidth(64);
-      if (ImGui::BeginCombo("##thick",
+      if (ImGui::BeginCombo("##lthick",
                             tsel >= 0 ? kPenWidthLabels[tsel] : "custom")) {
         for (int j = 0; j < kNumWidths; ++j)
           if (ImGui::Selectable(kPenWidthLabels[j], tsel == j))
