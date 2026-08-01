@@ -20,7 +20,7 @@ imgui_dep = imgui_proj.get_variable('imgui_dep')
 # ── Executable ───────────────────────────────────────────────────────────────
 
 parser_lib = static_library('hpgl_parser',
-  sources : ['src/hpgl_parser.cpp'],
+  sources : ['src/hpgl_parser.cpp', 'src/hpgl_font.cpp'],
   include_directories : include_directories('src'))
 
 fix_lib = static_library('hpgl_fix',

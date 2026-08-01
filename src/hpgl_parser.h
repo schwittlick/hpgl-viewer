@@ -31,6 +31,18 @@ struct HpglDoc {
   bool empty() const { return strokes.empty(); }
 };
 
+// One plotter unit is 0.025 mm, so a centimetre is 400 units.  HP-GL's
+// labelling commands (SI, ES) size characters in centimetres.
+constexpr float kUnitsPerCm = 400.f;
+
+// Default character size when a file labels without setting one (HP's A/A4
+// default of 0.19 × 0.27 cm).
+constexpr float kDefaultCharW = 0.19f * kUnitsPerCm;
+constexpr float kDefaultCharH = 0.27f * kUnitsPerCm;
+
+// Default LB terminator (ETX), changeable with DT.
+constexpr char kDefaultLabelTerm = '\x03';
+
 class HpglParser {
 public:
   // Parse HPGL from an in-memory string.  If progress is non-null, the
@@ -50,6 +62,16 @@ private:
   void handlePD(const std::string &params);
   void handlePA(const std::string &params);
 
+  // Labelling group.
+  void handleSI(const std::string &params);
+  void handleLO(const std::string &params);
+  void handleDI(const std::string &params);
+  void handleSL(const std::string &params);
+  void handleDT(const std::string &raw);
+  void handleCP(const std::string &params);
+  void handleLB(const std::string &text);
+  void resetLabelState();
+
   void ensureStroke();
   void updateBounds(float x, float y);
   void addPoint(float x, float y); // push point + update stroke and doc bounds
@@ -60,4 +82,11 @@ private:
   bool penDown    = false;
   float cx = 0, cy = 0;
   int curIdx = -1; // index into doc.strokes, -1 = none
+
+  // Labelling state, reset by IN/DF.  Character sizes are plotter units.
+  float charW = kDefaultCharW, charH = kDefaultCharH; // SI
+  float dirX = 1, dirY = 0;                           // DI (unit vector)
+  float slant = 0;                                    // SL (tangent)
+  int labelOrigin = 1;                                // LO
+  char labelTerm = kDefaultLabelTerm;                 // DT
 };

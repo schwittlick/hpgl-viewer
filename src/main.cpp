@@ -98,10 +98,12 @@ static PenStyle g_pens[10];
 static std::vector<LayerStyle> g_layerStyles;
 
 // Standard pen-width presets, shared by the pen-style and layer-style UIs.
-static const float kPenWidths[]      = {0.3f, 0.4f, 0.5f, 0.6f, 0.8f, 1.0f};
+static const float kPenWidths[]      = {0.3f, 0.4f, 0.5f, 0.6f, 0.8f,
+                                        1.0f, 1.2f, 1.5f, 2.0f, 2.1f};
 static const char *kPenWidthLabels[] = {"0.3 mm", "0.4 mm", "0.5 mm",
-                                        "0.6 mm", "0.8 mm", "1.0 mm"};
-static constexpr int kNumWidths = 6;
+                                        "0.6 mm", "0.8 mm", "1.0 mm",
+                                        "1.2 mm", "1.5 mm", "2.0 mm", "2.1 mm"};
+static constexpr int kNumWidths = 10;
 
 static std::string g_fixStatus;
 static int g_vsValue = 1; // velocity select for HPGL export (1–8)
