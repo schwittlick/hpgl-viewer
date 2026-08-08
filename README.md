@@ -35,6 +35,13 @@ direction.
 - Per-layer solid color: each layer row has a solid-colour toggle, an editable colour swatch, and a line-thickness dropdown, so a layer can override the pen palette and render every stroke in one colour + width — useful for compositing multiple single-color files (e.g. a dots layer and a lines layer at different widths). Pen-mode layers keep using the shared pen palette. The override is applied to PNG export too
 - Text rendering: `LB` labels are drawn with the Hershey Sans 1-stroke font, sized/positioned/rotated per `SI`, `LO`, `DI` and `SL`, so plotter text (titles, calendar dates, annotations) shows up in the viewport instead of being skipped. Labels become ordinary strokes, so they are fixed, merged and exported like any other geometry (an exported `_fixed.hpgl` contains the text as polylines, not `LB` commands)
 - Plotter coordinate tooltip on hover
+- Plotter bounds overlay (`B`): pick a plotter and the viewer draws its plotting envelope over the drawing, so you can see whether the file will actually land on paper. Three nested rectangles, all in the file's own HPGL unit space (no transform — HPGL files are authored in native plotter units):
+  - **paper** — the physical sheet, faintly filled. Drawn dashed while its offset is unverified (see below)
+  - **max area** — the furthest the pen can physically reach; anything outside is clipped by the machine
+  - **plot area** — max area inset by the plotter's deliberate per-edge margin; this is what a drawing should stay inside. Drawn green when the drawing fits, red when it does not
+  - Per-edge clearance in mm is labelled on the canvas and listed in the sidebar, negative and red where the drawing overruns that edge
+  - The plotter is auto-selected from the filename (files named `…_hpdm_sx_a1_…`, `…_hp7550a_a3_…` etc. match the registry's `name` field); turn this off with **Detect plotter from filename**
+  - **Fit includes bounds** makes fit-to-window (`C`) frame the union of the drawing and the bounds, so a drawing that lands off the sheet stays visible next to it
 - Pen-up move visualisation: green = short, orange = long but outside zone, red = will be fixed
 - Pen-up smear fix: inserts pen-8 waypoint dots along long pen-up moves, exported as a separate `_fixed.hpgl` file
   - **Threshold** slider: minimum move length to flag/fix (cm)
@@ -58,6 +65,7 @@ direction.
 | `C` | Fit to window |
 | `R` | Rotate 90° |
 | `E` | Apply pen-up fix (preview in viewport, use Export to save) |
+| `B` | Toggle the plotter bounds overlay |
 | `U` | Unload all files / reset to empty state |
 
 ## Build
@@ -108,11 +116,61 @@ ninja -C build test
 
 Then type your file path in the **File** panel and click **Open**.
 
+## Plotter registry
+
+The plotter bounds overlay reads `data/plotters.json`. Field names match the
+shared registry in the `cursor` project so entries can be copied between them.
+It currently covers the HP 7550A, the HP Draftmaster family (DM II / SX /
+RX-Plus), the Mutoh XP-500 and the Roland DXY family; adding a machine is one
+JSON object.
+
+The viewer takes the first of these that exists:
+
+1. `$HPGL_VIEWER_PLOTTERS`
+2. `~/.config/hpgl-viewer/plotters.json` (per-user, survives reinstalls)
+3. `<prefix>/share/hpgl-viewer/plotters.json` (installed copy)
+4. `data/plotters.json` relative to the working directory (running from a source tree)
+
+**Reload registry** in the sidebar re-reads the file, so entries can be edited
+and checked without restarting.
+
+### What is measured and what is guessed
+
+`max_area` and `margin` come from plotter documentation and are trustworthy —
+the effective plot area is `max_area` inset by `margin` (positive shrinks that
+edge inward, negative extends past the maximum).
+
+The **paper** block is not. No plotter manual states where the sheet sits
+relative to the plot area, so every entry ships with a placeholder derived by
+centring the plot area on the sheet — correct only for machines whose
+`max_area` is symmetric about the origin, and wrong for the ones whose origin
+is the lower-left of the plot area (the HP 7550A and the Roland DXYs). Those
+entries carry `"verified": false` and are drawn with a **dashed** sheet outline.
+
+To fix one: plot a file, measure the gap from the paper edge to the furthest
+the pen reached, dial the **left**/**bottom** offsets in the sidebar until the
+overlay matches, press **Copy paper JSON**, and paste the block into the
+plotter's entry. The offsets mean:
+
+```jsonc
+"paper": {
+  "size_mm":   { "w": 841, "h": 594 },   // the sheet
+  "offset_mm": { "left": 18.0, "bottom": 7.0 },
+  // ^ mm from the sheet's left/bottom edge to max_area.x / max_area.y,
+  //   i.e. how far in from the paper edge the pen can first reach.
+  //   Negative means the plot area runs off the sheet.
+  "verified": true                        // stops the dashed outline
+}
+```
+
 ## Notes
 
 - HPGL Y-axis: the viewer treats Y as-is (no flip). If your plotter files
   appear upside-down, tick the "Flip Y" checkbox (easy to add).
 - Pen numbers beyond 8 are clamped to pen 8's style.
+- The bounds overlay is drawn on the CPU alongside the grid, so toggling it
+  never invalidates the cached canvas FBO. It is a viewport aid only — it is
+  not included in PNG export.
 - Label font: `src/hpgl_font.cpp` is generated by `tools/gen_hpgl_font.py` from
   `tools/HersheySans1.svg`, a vendored copy of the Hershey Sans 1-stroke font
   (as distributed with Inkscape's Hershey Text extension). It stands in for the

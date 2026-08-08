@@ -1,0 +1,379 @@
+{
+  "schema_version": 1,
+  "_comment": "Plotter registry for hpgl-viewer. Field names match the shared registry in the cursor project so entries can be copied between them. All plotter coordinates are in native plotter units; 'units_per_mm' converts to millimetres. 'max_area' is the machine's maximum plot area (the furthest the pen can reach); 'margin' is a deliberate per-edge inset applied on top of it (positive shrinks that edge inward, negative extends past the maximum). The effective plot area is max_area inset by margin. HPGL files are authored in this same unit space, so these rectangles overlay a loaded drawing directly.",
+  "_paper_comment": "'paper' describes the physical sheet, which hpgl-viewer draws around the plot area so you can see how much unreachable paper margin a drawing leaves. 'size_mm' is the sheet. 'offset_mm.left' is the distance in mm from the sheet's LEFT edge to max_area.x, and 'offset_mm.bottom' the distance from the sheet's BOTTOM edge to max_area.y — i.e. how far in from the paper edge the pen can first reach. Negative means the plot area runs off the sheet. Every offset below is a placeholder derived by centring the plot area on the sheet, which is only correct for machines whose max_area is symmetric about the origin; each entry is marked \"verified\": false until measured against a real plot. Measure a plot, put the real numbers here, and set \"verified\": true.",
+
+  "plotters": [
+    {
+      "id": "HP_7550A_A3",
+      "name": "hp7550a_a3",
+      "hpgl_model": "7550A",
+      "default_for_model": true,
+      "export_format": "HPGL",
+      "max_area": { "x": 0, "y": 0, "x2": 15970, "y2": 10870 },
+      "margin": { "left": 0, "bottom": 0, "right": 320, "top": 0 },
+      "units_per_mm": { "x": 40, "y": 40 },
+      "paper": {
+        "size_mm": { "w": 420, "h": 297 },
+        "offset_mm": { "left": 10.38, "bottom": 12.63 },
+        "verified": false
+      },
+      "note": "8 mm of extra space subtracted from the right edge. Origin is the lower-left of the plot area, not the sheet, so the paper offset is asymmetric in reality — measure it."
+    },
+    {
+      "id": "HP_7550A_A4",
+      "name": "hp7550a_a4",
+      "hpgl_model": "7550A",
+      "export_format": "HPGL",
+      "max_area": { "x": 0, "y": 0, "x2": 10870, "y2": 7600 },
+      "margin": { "left": 0, "bottom": 560, "right": 0, "top": 0 },
+      "units_per_mm": { "x": 40, "y": 40 },
+      "paper": {
+        "size_mm": { "w": 297, "h": 210 },
+        "offset_mm": { "left": 12.63, "bottom": 10.00 },
+        "verified": false
+      },
+      "note": "560 units padding subtracted from bottom"
+    },
+
+    {
+      "id": "HP_DM_II_A0",
+      "name": "hpdm_ii_a0",
+      "hpgl_model": "7596A",
+      "default_for_model": true,
+      "export_format": "HPGL",
+      "max_area": { "x": -23036, "y": -16598, "x2": 23036, "y2": 16598 },
+      "units_per_mm": { "x": 39.948, "y": 40 },
+      "paper": {
+        "size_mm": { "w": 1189, "h": 841 },
+        "offset_mm": { "left": 17.85, "bottom": 5.55 },
+        "verified": false
+      }
+    },
+    {
+      "id": "HP_DM_II_A1",
+      "name": "hpdm_ii_a1",
+      "hpgl_model": "7596A",
+      "export_format": "HPGL",
+      "max_area": { "x": -16080, "y": -11660, "x2": 16080, "y2": 11660 },
+      "units_per_mm": { "x": 39.948, "y": 40 },
+      "paper": {
+        "size_mm": { "w": 841, "h": 594 },
+        "offset_mm": { "left": 17.98, "bottom": 5.50 },
+        "verified": false
+      }
+    },
+    {
+      "id": "HP_DM_II_A3",
+      "name": "hpdm_ii_a3",
+      "hpgl_model": "7596A",
+      "export_format": "HPGL",
+      "max_area": { "x": -7656, "y": -5740, "x2": 7656, "y2": 5740 },
+      "units_per_mm": { "x": 39.948, "y": 40 },
+      "paper": {
+        "size_mm": { "w": 420, "h": 297 },
+        "offset_mm": { "left": 18.35, "bottom": 5.00 },
+        "verified": false
+      }
+    },
+
+    {
+      "id": "HP_DM_SX_A0",
+      "name": "hpdm_sx_a0",
+      "hpgl_model": "7595A",
+      "export_format": "HPGL",
+      "max_area": { "x": -23036, "y": -16598, "x2": 23036, "y2": 16598 },
+      "units_per_mm": { "x": 40.0, "y": 40.0 },
+      "paper": {
+        "size_mm": { "w": 1189, "h": 841 },
+        "offset_mm": { "left": 18.60, "bottom": 5.55 },
+        "verified": false
+      }
+    },
+    {
+      "id": "HP_DM_SX_A1",
+      "name": "hpdm_sx_a1",
+      "hpgl_model": "7595A",
+      "default_for_model": true,
+      "export_format": "HPGL",
+      "max_area": { "x": -16100, "y": -11600, "x2": 16100, "y2": 11600 },
+      "margin": { "left": 1000, "bottom": 200, "right": 0, "top": 200 },
+      "units_per_mm": { "x": 40.0, "y": 40.0 },
+      "paper": {
+        "size_mm": { "w": 841, "h": 594 },
+        "offset_mm": { "left": 18.00, "bottom": 7.00 },
+        "verified": false
+      },
+      "note": "25 mm left, 5 mm top/bottom margin"
+    },
+    {
+      "id": "HP_DM_SX_A3",
+      "name": "hpdm_sx_a3",
+      "hpgl_model": "7595A",
+      "export_format": "HPGL",
+      "max_area": { "x": -7690, "y": -5744, "x2": 7690, "y2": 5744 },
+      "units_per_mm": { "x": 40.0, "y": 40.0 },
+      "paper": {
+        "size_mm": { "w": 420, "h": 297 },
+        "offset_mm": { "left": 17.75, "bottom": 4.90 },
+        "verified": false
+      }
+    },
+
+    {
+      "id": "HP_DM_RX_PLUS_A0",
+      "name": "hpdm_rx_plus_a0",
+      "hpgl_model": "7596A",
+      "export_format": "HPGL",
+      "max_area": { "x": -21760, "y": -15400, "x2": 22880, "y2": 15480 },
+      "units_per_mm": { "x": 40, "y": 40 },
+      "paper": {
+        "size_mm": { "w": 1119, "h": 771 },
+        "offset_mm": { "left": 1.50, "bottom": 0.00 },
+        "verified": false
+      },
+      "note": "max_area is asymmetric about the origin, so the centring default is definitely wrong here — measure. Sheet assumed to be the 1119 x 771 mm stock, not ISO A0."
+    },
+    {
+      "id": "HP_DM_RX_PLUS_A1",
+      "name": "hpdm_rx_plus_a1",
+      "hpgl_model": "7596A",
+      "export_format": "HPGL",
+      "max_area": { "x": -16090, "y": -11684, "x2": 16090, "y2": 11684 },
+      "units_per_mm": { "x": 40, "y": 40 },
+      "paper": {
+        "size_mm": { "w": 841, "h": 594 },
+        "offset_mm": { "left": 18.25, "bottom": 4.90 },
+        "verified": false
+      }
+    },
+    {
+      "id": "HP_DM_RX_PLUS_A2",
+      "name": "hpdm_rx_plus_a2",
+      "hpgl_model": "7596A",
+      "export_format": "HPGL",
+      "max_area": { "x": -10740, "y": -8230, "x2": 10740, "y2": 8230 },
+      "units_per_mm": { "x": 40, "y": 40 },
+      "paper": {
+        "size_mm": { "w": 594, "h": 420 },
+        "offset_mm": { "left": 28.50, "bottom": 4.25 },
+        "verified": false
+      }
+    },
+    {
+      "id": "HP_DM_RX_PLUS_A3",
+      "name": "hpdm_rx_plus_a3",
+      "hpgl_model": "7596A",
+      "export_format": "HPGL",
+      "max_area": { "x": -7302, "y": -5820, "x2": 7302, "y2": 5820 },
+      "units_per_mm": { "x": 40, "y": 40 },
+      "paper": {
+        "size_mm": { "w": 420, "h": 297 },
+        "offset_mm": { "left": 27.45, "bottom": 3.00 },
+        "verified": false
+      }
+    },
+    {
+      "id": "HP_DM_RX_PLUS_1000x700",
+      "name": "hpdm_rx_plus_1000x700",
+      "hpgl_model": "7596A",
+      "export_format": "HPGL",
+      "max_area": { "x": -19230, "y": -13791, "x2": 19230, "y2": 13791 },
+      "units_per_mm": { "x": 40, "y": 40 },
+      "paper": {
+        "size_mm": { "w": 1000, "h": 700 },
+        "offset_mm": { "left": 19.25, "bottom": 5.23 },
+        "verified": false
+      }
+    },
+    {
+      "id": "HP_DM_RX_PLUS_30x50",
+      "name": "hpdm_rx_plus_30x50",
+      "hpgl_model": "7596A",
+      "export_format": "HPGL",
+      "max_area": { "x": -8925, "y": -5813, "x2": 8925, "y2": 5813 },
+      "units_per_mm": { "x": 40, "y": 40 },
+      "paper": {
+        "size_mm": { "w": 500, "h": 300 },
+        "offset_mm": { "left": 26.88, "bottom": 4.68 },
+        "verified": false
+      }
+    },
+
+    {
+      "id": "MUTOH_XP500_A1",
+      "name": "mutoh_xp500_a1",
+      "hpgl_model": "7595A",
+      "default_for_model": true,
+      "export_format": "HPGL",
+      "max_area": { "x": -16200, "y": -11645, "x2": 16200, "y2": 11645 },
+      "margin": { "left": 0, "bottom": 0, "right": 600, "top": 0 },
+      "units_per_mm": { "x": 40.0, "y": 40.0 },
+      "paper": {
+        "size_mm": { "w": 841, "h": 594 },
+        "offset_mm": { "left": 15.50, "bottom": 5.88 },
+        "verified": false
+      },
+      "note": "15 mm inset on the right edge. The upstream registry describes this margin as bottom padding while storing it under \"right\" — worth re-measuring which edge it belongs to."
+    },
+    {
+      "id": "MUTOH_XP500_A2",
+      "name": "mutoh_xp500_a2",
+      "hpgl_model": "7595A",
+      "export_format": "HPGL",
+      "max_area": { "x": -11284, "y": -8149, "x2": 11285, "y2": 8149 },
+      "margin": { "left": 0, "bottom": 0, "right": 600, "top": 0 },
+      "units_per_mm": { "x": 40.0, "y": 40.0 },
+      "paper": {
+        "size_mm": { "w": 594, "h": 420 },
+        "offset_mm": { "left": 14.89, "bottom": 6.28 },
+        "verified": false
+      }
+    },
+    {
+      "id": "MUTOH_XP500_A3",
+      "name": "mutoh_xp500_a3",
+      "hpgl_model": "7595A",
+      "export_format": "HPGL",
+      "max_area": { "x": -7815, "y": -5716, "x2": 7815, "y2": 5716 },
+      "margin": { "left": 0, "bottom": 0, "right": 600, "top": 0 },
+      "units_per_mm": { "x": 40.0, "y": 40.0 },
+      "paper": {
+        "size_mm": { "w": 420, "h": 297 },
+        "offset_mm": { "left": 14.63, "bottom": 5.60 },
+        "verified": false
+      }
+    },
+    {
+      "id": "MUTOH_XP500_100x70cm",
+      "name": "mutoh_xp500_100x70cm",
+      "hpgl_model": "7595A",
+      "export_format": "HPGL",
+      "max_area": { "x": -19370, "y": -13728, "x2": 19370, "y2": 13728 },
+      "margin": { "left": 0, "bottom": 0, "right": 600, "top": 0 },
+      "units_per_mm": { "x": 40.0, "y": 40.0 },
+      "paper": {
+        "size_mm": { "w": 1000, "h": 700 },
+        "offset_mm": { "left": 15.75, "bottom": 6.80 },
+        "verified": false
+      }
+    },
+    {
+      "id": "MUTOH_XP500_500x297mm",
+      "name": "mutoh_xp500_500x297mm",
+      "hpgl_model": "7595A",
+      "export_format": "HPGL",
+      "max_area": { "x": -9452, "y": -5722, "x2": 9452, "y2": 5722 },
+      "margin": { "left": 0, "bottom": 0, "right": 600, "top": 0 },
+      "units_per_mm": { "x": 40.0, "y": 40.0 },
+      "paper": {
+        "size_mm": { "w": 500, "h": 297 },
+        "offset_mm": { "left": 13.70, "bottom": 5.45 },
+        "verified": false
+      }
+    },
+
+    {
+      "id": "ROLAND_DXY885",
+      "name": "dxy885",
+      "hpgl_model": "DXY-885",
+      "export_format": "HPGL",
+      "max_area": { "x": 0, "y": 0, "x2": 16158, "y2": 11040 },
+      "units_per_mm": { "x": 40, "y": 40 },
+      "paper": {
+        "size_mm": { "w": 420, "h": 297 },
+        "offset_mm": { "left": 8.03, "bottom": 10.50 },
+        "verified": false
+      },
+      "note": "max_area taken from operator handbook"
+    },
+    {
+      "id": "ROLAND_DXY980",
+      "name": "dxy980",
+      "hpgl_model": "DXY-980",
+      "export_format": "HPGL",
+      "max_area": { "x": 0, "y": 0, "x2": 15200, "y2": 10800 },
+      "margin": { "left": 200, "bottom": 520, "right": 0, "top": 320 },
+      "units_per_mm": { "x": 40, "y": 40 },
+      "paper": {
+        "size_mm": { "w": 420, "h": 297 },
+        "offset_mm": { "left": 20.00, "bottom": 13.50 },
+        "verified": false
+      },
+      "note": "max_area from manual; 5 mm left, 13 mm bottom, 8 mm top margin"
+    },
+    {
+      "id": "ROLAND_DXY990",
+      "name": "dxy990",
+      "hpgl_model": "DXY-990",
+      "export_format": "HPGL",
+      "max_area": { "x": 0, "y": 0, "x2": 16640, "y2": 11040 },
+      "margin": { "left": 240, "bottom": 160, "right": 480, "top": 0 },
+      "units_per_mm": { "x": 40, "y": 40 },
+      "paper": {
+        "size_mm": { "w": 420, "h": 297 },
+        "offset_mm": { "left": 2.00, "bottom": 10.50 },
+        "verified": false
+      },
+      "note": "max_area from manual; 6 mm left, 4 mm bottom, 12 mm right margin"
+    },
+    {
+      "id": "ROLAND_DXY1200_A3",
+      "name": "dxy1200_a3",
+      "hpgl_model": "DXY-1200",
+      "default_for_model": true,
+      "export_format": "HPGL",
+      "max_area": { "x": 0, "y": 0, "x2": 16158, "y2": 11040 },
+      "margin": { "left": 0, "bottom": 0, "right": 240, "top": 240 },
+      "units_per_mm": { "x": 40, "y": 40 },
+      "paper": {
+        "size_mm": { "w": 420, "h": 297 },
+        "offset_mm": { "left": 8.03, "bottom": 10.50 },
+        "verified": false
+      },
+      "note": "max_area from operator handbook; 6 mm removed on both directions"
+    },
+    {
+      "id": "ROLAND_DXY1200_A5",
+      "name": "dxy1200_a5",
+      "hpgl_model": "DXY-1200",
+      "export_format": "HPGL",
+      "max_area": { "x": 0, "y": 0, "x2": 8400, "y2": 5950 },
+      "units_per_mm": { "x": 40, "y": 40 },
+      "paper": {
+        "size_mm": { "w": 210, "h": 148 },
+        "offset_mm": { "left": 0.00, "bottom": 0.00 },
+        "verified": false
+      },
+      "note": "max_area from operator addendum; plot area is as wide as the sheet, so the real offsets are near zero"
+    },
+    {
+      "id": "ROLAND_DXY1200_A3_EXPANDED",
+      "name": "dxy1200_expanded",
+      "hpgl_model": "DXY-1200",
+      "export_format": "HPGL",
+      "max_area": { "x": 0, "y": 0, "x2": 17272, "y2": 11880 },
+      "units_per_mm": { "x": 40, "y": 40 },
+      "paper": {
+        "size_mm": { "w": 420, "h": 297 },
+        "offset_mm": { "left": -5.90, "bottom": 0.00 },
+        "verified": false
+      },
+      "note": "expanded mode reaches past the A3 sheet on purpose — the negative left offset is expected, not a data error"
+    },
+    {
+      "id": "ROLAND_DXY1300",
+      "name": "dxy1300",
+      "hpgl_model": "DXY-1300",
+      "export_format": "HPGL",
+      "max_area": { "x": 0, "y": 0, "x2": 16158, "y2": 11040 },
+      "units_per_mm": { "x": 40, "y": 40 },
+      "paper": {
+        "size_mm": { "w": 420, "h": 297 },
+        "offset_mm": { "left": 8.03, "bottom": 10.50 },
+        "verified": false
+      },
+      "note": "max_area taken from operator handbook"
+    }
+  ]
+}

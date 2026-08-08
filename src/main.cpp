@@ -12,6 +12,7 @@
 #include "export_png.h"
 #include "hpgl_fix.h"
 #include "hpgl_parser.h"
+#include "plotters.h"
 #include "renderer.h"
 #include "view_state.h"
 
@@ -107,6 +108,87 @@ static constexpr int kNumWidths = 10;
 
 static std::string g_fixStatus;
 static int g_vsValue = 1; // velocity select for HPGL export (1–8)
+
+// ─── Plotter bounds
+// ──────────────────────────────────────────────────────────
+
+static PlotterRegistry g_plotters;
+static std::string     g_plotterRegistryPath; // file the registry loaded from
+static std::string     g_plotterError;        // non-empty when nothing loaded
+static int             g_plotterIdx  = -1;    // index into g_plotters.plotters
+static bool            g_showBounds  = false;
+static bool            g_showPaper   = true;
+static bool            g_autoDetect  = true;  // pick the plotter from filename
+static bool            g_fitToBounds = true;  // include bounds in fit-to-window
+static PlotterOverlay  g_overlay;
+
+// Live paper-offset tweaks, seeded from the registry whenever the selection
+// changes.  These exist so an offset can be dialled in against a real plot;
+// the value is then written back into data/plotters.json by hand.
+static float g_paperOffLeftMm   = 0.f;
+static float g_paperOffBottomMm = 0.f;
+
+static void syncPaperOffsets() {
+  if (g_plotterIdx < 0) return;
+  const PaperSpec &ps = g_plotters.plotters[g_plotterIdx].paper;
+  g_paperOffLeftMm   = ps.offsetLeftMm;
+  g_paperOffBottomMm = ps.offsetBottomMm;
+}
+
+static void selectPlotter(int idx) {
+  g_plotterIdx = idx;
+  syncPaperOffsets();
+  // Persist "(none)" too, so an explicit deselection survives a restart.
+  configSave("plotter_id", idx >= 0 ? g_plotters.plotters[idx].id : "");
+}
+
+static void loadPlotterRegistryNow() {
+  PlotterRegistry reg;
+  std::string used, err;
+  if (loadPlotterRegistryFromDefaults(reg, used, err)) {
+    // Keep the current selection across a reload when the id still exists.
+    std::string prevId =
+        (g_plotterIdx >= 0 && g_plotterIdx < static_cast<int>(g_plotters.plotters.size()))
+            ? g_plotters.plotters[g_plotterIdx].id
+            : configLoad("plotter_id");
+    g_plotters            = std::move(reg);
+    g_plotterRegistryPath = used;
+    g_plotterError.clear();
+    g_plotterIdx = prevId.empty() ? -1 : g_plotters.indexOfId(prevId);
+    syncPaperOffsets();
+  } else {
+    g_plotters.plotters.clear();
+    g_plotterRegistryPath.clear();
+    g_plotterError = err;
+    g_plotterIdx   = -1;
+  }
+}
+
+// The plot area a drawing must stay inside, with the live offset tweaks
+// applied to the sheet.  Returns false when no plotter is selected.
+static bool buildOverlay(PlotterOverlay &ov) {
+  ov = PlotterOverlay{};
+  if (g_plotterIdx < 0 || g_plotterIdx >= static_cast<int>(g_plotters.plotters.size()))
+    return false;
+
+  Plotter p = g_plotters.plotters[g_plotterIdx];
+  p.paper.offsetLeftMm   = g_paperOffLeftMm;
+  p.paper.offsetBottomMm = g_paperOffBottomMm;
+
+  ov.show      = g_showBounds;
+  ov.showPaper = g_showPaper;
+  ov.maxArea   = p.maxArea;
+  ov.effArea   = effectivePlotArea(p);
+  ov.hasPaper  = paperRect(p, ov.paper);
+  // Hand-tweaked offsets are a measurement in progress, so they stay flagged
+  // as unverified until the tweak matches what the registry records.
+  ov.paperVerified =
+      p.paper.verified &&
+      fabsf(g_paperOffLeftMm - g_plotters.plotters[g_plotterIdx].paper.offsetLeftMm) < 1e-3f &&
+      fabsf(g_paperOffBottomMm - g_plotters.plotters[g_plotterIdx].paper.offsetBottomMm) < 1e-3f;
+  ov.label     = p.name;
+  return true;
+}
 
 // ─── Layer helpers
 // ───────────────────────────────────────────────────────────
@@ -240,6 +322,16 @@ static bool installCompletedJob() {
     g_layers.clear();
     g_activeLayer = -1;
   }
+  // Exported files are conventionally named "<work>_<plotter-name>_<hash>.hpgl",
+  // so the plotter a drawing was authored for is usually right there in the
+  // filename.  An explicit choice made after loading is not overridden.
+  if (g_autoDetect && !g_plotters.empty()) {
+    std::string fname = fs::path(g_loadJob->path).filename().string();
+    int hit = matchPlotterByFilename(g_plotters, fname);
+    if (hit >= 0 && hit != g_plotterIdx)
+      selectPlotter(hit);
+  }
+
   Layer layer;
   layer.path = g_loadJob->path;
   layer.doc  = std::move(g_loadJob->result);
@@ -383,6 +475,13 @@ int main(int argc, char** argv) {
   initPenColors(g_pens);
   g_lastOpenDir = configLoad("last_open_dir");
 
+  loadPlotterRegistryNow();
+  g_showBounds = configLoad("show_plotter_bounds") == "1";
+  if (std::string v = configLoad("show_paper"); !v.empty())
+    g_showPaper = (v == "1");
+  if (std::string v = configLoad("auto_detect_plotter"); !v.empty())
+    g_autoDetect = (v == "1");
+
   g_window = window;
 
   if (argc > 1)
@@ -427,6 +526,11 @@ int main(int argc, char** argv) {
       }
       if (ImGui::IsKeyPressed(ImGuiKey_E) && g_activeLayer >= 0)
         applyFix();
+      if (ImGui::IsKeyPressed(ImGuiKey_B)) {
+        g_showBounds = !g_showBounds;
+        configSave("show_plotter_bounds", g_showBounds ? "1" : "0");
+        g_fitRequested = true;
+      }
       if (ImGui::IsKeyPressed(ImGuiKey_O)) {
         std::string path = openFileDialog();
         if (!path.empty()) enqueueLoad(path);
@@ -652,6 +756,123 @@ int main(int argc, char** argv) {
     if (!g_fixStatus.empty())
       ImGui::TextWrapped("%s", g_fixStatus.c_str());
 
+    // ── Plotter bounds ───────────────────────────────────────────────────
+    ImGui::SeparatorText("Plotter bounds");
+    if (g_plotters.empty()) {
+      ImGui::TextWrapped("%s", g_plotterError.empty()
+                                   ? "No plotter registry loaded."
+                                   : g_plotterError.c_str());
+      if (ImGui::Button("Reload registry"))
+        loadPlotterRegistryNow();
+    } else {
+      const char *preview = g_plotterIdx >= 0
+                                ? g_plotters.plotters[g_plotterIdx].name.c_str()
+                                : "(none)";
+      ImGui::SetNextItemWidth(200);
+      if (ImGui::BeginCombo("Plotter", preview)) {
+        if (ImGui::Selectable("(none)", g_plotterIdx < 0))
+          selectPlotter(-1);
+        for (int i = 0; i < static_cast<int>(g_plotters.plotters.size()); ++i) {
+          const Plotter &pl = g_plotters.plotters[i];
+          char item[128];
+          snprintf(item, sizeof(item), "%s  (%s)", pl.name.c_str(),
+                   pl.hpglModel.empty() ? "?" : pl.hpglModel.c_str());
+          if (ImGui::Selectable(item, i == g_plotterIdx))
+            selectPlotter(i);
+        }
+        ImGui::EndCombo();
+      }
+
+      if (ImGui::Checkbox("Show bounds  [B]", &g_showBounds)) {
+        configSave("show_plotter_bounds", g_showBounds ? "1" : "0");
+        g_fitRequested = true;
+      }
+      ImGui::SameLine();
+      if (ImGui::Checkbox("Paper", &g_showPaper)) {
+        configSave("show_paper", g_showPaper ? "1" : "0");
+        g_fitRequested = true;
+      }
+      if (ImGui::Checkbox("Detect plotter from filename", &g_autoDetect))
+        configSave("auto_detect_plotter", g_autoDetect ? "1" : "0");
+      if (ImGui::Checkbox("Fit includes bounds", &g_fitToBounds))
+        g_fitRequested = true;
+
+      if (g_plotterIdx >= 0) {
+        const Plotter &pl = g_plotters.plotters[g_plotterIdx];
+        Rect eff = effectivePlotArea(pl);
+        ImGui::Text("Plot area: %.1f x %.1f mm",
+                    eff.w() / pl.unitsPerMmX, eff.h() / pl.unitsPerMmY);
+        if (pl.margin.any())
+          ImGui::TextDisabled("margin L%.0f B%.0f R%.0f T%.0f units",
+                              pl.margin.left, pl.margin.bottom,
+                              pl.margin.right, pl.margin.top);
+
+        // Per-edge clearance between the drawing and the usable plot area.
+        // This is the whole point of the overlay: negative means the plot
+        // will be clipped at that edge.
+        if (!g_mergedDoc.empty()) {
+          Rect docRect{g_mergedDoc.minX, g_mergedDoc.minY,
+                       g_mergedDoc.maxX, g_mergedDoc.maxY};
+          Clearance cl = clearanceMm(docRect, eff, pl.unitsPerMmX, pl.unitsPerMmY);
+          const ImVec4 bad{1.f, 0.42f, 0.36f, 1.f};
+          const ImVec4 ok {0.55f, 0.85f, 0.62f, 1.f};
+          ImGui::TextColored(cl.fits() ? ok : bad, "%s",
+                             cl.fits() ? "Fits the plot area"
+                                       : "OUTSIDE the plot area");
+          struct { const char *n; float v; } edges[4] = {
+            {"left",   cl.left},   {"right", cl.right},
+            {"bottom", cl.bottom}, {"top",   cl.top},
+          };
+          for (auto &e : edges) {
+            ImGui::TextColored(e.v < 0.f ? bad : ok, "  %-7s %+.1f mm",
+                               e.n, e.v);
+          }
+        }
+
+        // Paper offset — editable so it can be dialled in against a real
+        // plot, then written back into the registry by hand.
+        if (pl.paper.present) {
+          ImGui::SeparatorText("Paper");
+          ImGui::Text("Sheet: %.0f x %.0f mm", pl.paper.wMm, pl.paper.hMm);
+          if (!pl.paper.verified)
+            ImGui::TextDisabled("offset unverified (centred guess)");
+          ImGui::SetNextItemWidth(110);
+          ImGui::DragFloat("left##paperoff", &g_paperOffLeftMm, 0.1f,
+                           -200.f, 200.f, "%.2f mm");
+          ImGui::SetNextItemWidth(110);
+          ImGui::DragFloat("bottom##paperoff", &g_paperOffBottomMm, 0.1f,
+                           -200.f, 200.f, "%.2f mm");
+          if (ImGui::Button("Copy paper JSON")) {
+            char snip[512];
+            snprintf(snip, sizeof(snip),
+                     "\"paper\": {\n"
+                     "  \"size_mm\": { \"w\": %.0f, \"h\": %.0f },\n"
+                     "  \"offset_mm\": { \"left\": %.2f, \"bottom\": %.2f },\n"
+                     "  \"verified\": true\n"
+                     "}",
+                     pl.paper.wMm, pl.paper.hMm,
+                     g_paperOffLeftMm, g_paperOffBottomMm);
+            ImGui::SetClipboardText(snip);
+            g_fixStatus = "Paper JSON copied — paste into " +
+                          g_plotterRegistryPath;
+          }
+          ImGui::SameLine();
+          if (ImGui::Button("Reset##paperoff"))
+            syncPaperOffsets();
+        } else {
+          ImGui::TextDisabled("No paper data for this plotter");
+        }
+
+        if (!pl.note.empty())
+          ImGui::TextWrapped("%s", pl.note.c_str());
+      }
+
+      if (ImGui::Button("Reload registry"))
+        loadPlotterRegistryNow();
+      ImGui::SameLine();
+      ImGui::TextDisabled("%s", g_plotterRegistryPath.c_str());
+    }
+
     ImGui::SeparatorText("View");
     ImGui::Checkbox("Show pen-up moves", &g_showPenUp);
     ImGui::Checkbox("Show coordinate grid", &g_showCoords);
@@ -711,10 +932,34 @@ int main(int argc, char** argv) {
     dl->AddRectFilled(canvasPos, {canvasPos.x + cW, canvasPos.y + cH},
                       IM_COL32(245, 245, 240, 255));
 
+    bool haveOverlay = buildOverlay(g_overlay);
+
     static ImVec2 lastCanvasSize = {0, 0};
     bool sizeChanged = (cW != lastCanvasSize.x || cH != lastCanvasSize.y);
     if (g_fitRequested || sizeChanged) {
-      auto vs = fitToCanvas(cW, cH, g_mergedDoc, g_rotation);
+      // With bounds shown, fit the union of the drawing and the plotter/paper
+      // rectangles — a drawing that lands off the sheet is exactly the case
+      // where you need to see both at once.
+      ViewState vs;
+      if (haveOverlay && g_showBounds && g_fitToBounds) {
+        Rect u = g_showPaper && g_overlay.hasPaper ? g_overlay.paper
+                                                   : g_overlay.maxArea;
+        if (g_showPaper && g_overlay.hasPaper) {
+          u.x  = std::min(u.x,  g_overlay.maxArea.x);
+          u.y  = std::min(u.y,  g_overlay.maxArea.y);
+          u.x2 = std::max(u.x2, g_overlay.maxArea.x2);
+          u.y2 = std::max(u.y2, g_overlay.maxArea.y2);
+        }
+        if (!g_mergedDoc.empty()) {
+          u.x  = std::min(u.x,  g_mergedDoc.minX);
+          u.y  = std::min(u.y,  g_mergedDoc.minY);
+          u.x2 = std::max(u.x2, g_mergedDoc.maxX);
+          u.y2 = std::max(u.y2, g_mergedDoc.maxY);
+        }
+        vs = fitToBounds(cW, cH, u.x, u.y, u.x2, u.y2, g_rotation);
+      } else {
+        vs = fitToCanvas(cW, cH, g_mergedDoc, g_rotation);
+      }
       g_scale = vs.scale; g_panX = vs.panX; g_panY = vs.panY;
     }
     g_fitRequested = false;
@@ -814,10 +1059,13 @@ int main(int argc, char** argv) {
       hash = h64(hash, bits(ls.style.thickness));
     }
 
+    // The overlay is CPU-drawn every frame alongside the grid, so it does not
+    // feed the FBO hash — toggling it never invalidates the cached scene.
     DrawParams dp{g_panX, g_panY, g_scale, g_rotation,
                   g_showPenUp, g_penUpThreshold, g_pens,
                   g_layerStyles.data(), static_cast<int>(g_layerStyles.size()),
                   g_showCoords,
+                  /*plotter=*/haveOverlay ? &g_overlay : nullptr,
                   /*fboTex=*/g_useFboCache ? g_canvasFbo.tex : 0u};
 
     static uint64_t lastSceneHash = ~uint64_t{0};

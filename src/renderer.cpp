@@ -560,6 +560,152 @@ static void drawCoordinateSystem(ImDrawList *dl, ImVec2 origin,
   }
 }
 
+// ── Plotter bounds overlay ────────────────────────────────────────────────────
+
+namespace {
+
+// The four corners of an HPGL-unit rect, in screen space.
+struct ScreenRect { ImVec2 c[4]; };
+
+ScreenRect projectRect(const Rect &r, ImVec2 origin, float panX, float panY,
+                       float scale, float cW, float cH, float cosR, float sinR) {
+  ScreenRect s;
+  s.c[0] = xfPoint(r.x,  r.y,  origin, panX, panY, scale, cW, cH, cosR, sinR);
+  s.c[1] = xfPoint(r.x2, r.y,  origin, panX, panY, scale, cW, cH, cosR, sinR);
+  s.c[2] = xfPoint(r.x2, r.y2, origin, panX, panY, scale, cW, cH, cosR, sinR);
+  s.c[3] = xfPoint(r.x,  r.y2, origin, panX, panY, scale, cW, cH, cosR, sinR);
+  return s;
+}
+
+// Dashes along a screen-space polygon edge.  ImGui has no dashed-line
+// primitive, and the distinction matters here: a dashed sheet outline means
+// "this offset is a guess, go measure it".
+void dashedEdge(ImDrawList *dl, ImVec2 a, ImVec2 b, ImU32 col, float thick,
+                float dash) {
+  float dx = b.x - a.x, dy = b.y - a.y;
+  float len = sqrtf(dx * dx + dy * dy);
+  // An extreme zoom can push a projected corner to infinity; bail rather than
+  // feed a NaN step count to the loop below.
+  if (!(len > 1e-3f) || !std::isfinite(len)) return;
+  float ux = dx / len, uy = dy / len;
+  // Cap the segment count so a wildly zoomed-in edge cannot flood the draw
+  // list with thousands of tiny quads.
+  int   steps = std::min(2000, static_cast<int>(len / (dash * 2.f)) + 1);
+  for (int i = 0; i < steps; ++i) {
+    float s0 = i * dash * 2.f;
+    float s1 = std::min(s0 + dash, len);
+    if (s0 >= len) break;
+    dl->AddLine({a.x + ux * s0, a.y + uy * s0},
+                {a.x + ux * s1, a.y + uy * s1}, col, thick);
+  }
+}
+
+void strokeRect(ImDrawList *dl, const ScreenRect &s, ImU32 col, float thick,
+                bool dashed) {
+  if (!dashed) {
+    dl->AddPolyline(s.c, 4, col, ImDrawFlags_Closed, thick);
+    return;
+  }
+  for (int i = 0; i < 4; ++i)
+    dashedEdge(dl, s.c[i], s.c[(i + 1) % 4], col, thick, 7.f);
+}
+
+// Midpoint of a rect edge, nudged `out` pixels along the edge's outward
+// normal so the label sits clear of the line itself.
+ImVec2 edgeLabelPos(const ScreenRect &s, int edge, ImVec2 centre, float out) {
+  ImVec2 a = s.c[edge], b = s.c[(edge + 1) % 4];
+  ImVec2 mid{(a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f};
+  float  nx = mid.x - centre.x, ny = mid.y - centre.y;
+  float  n  = sqrtf(nx * nx + ny * ny);
+  if (n < 1e-3f) return mid;
+  return {mid.x + nx / n * out, mid.y + ny / n * out};
+}
+
+} // namespace
+
+void drawPlotterOverlay(ImDrawList *dl, ImVec2 origin, float cW, float cH,
+                        const HpglDoc &doc, const PlotterOverlay &ov,
+                        float panX, float panY, float scale, float rotation) {
+  if (!ov.show) return;
+
+  const float cosR = cosf(rotation);
+  const float sinR = sinf(rotation);
+  auto project = [&](const Rect &r) {
+    return projectRect(r, origin, panX, panY, scale, cW, cH, cosR, sinR);
+  };
+
+  // Does the drawing stay inside the area it is supposed to?  This decides the
+  // colour of the effective-area outline and of each edge readout.
+  Rect      docRect{doc.minX, doc.minY, doc.maxX, doc.maxY};
+  Clearance cl{};
+  bool      haveDoc = !doc.empty();
+  if (haveDoc) {
+    // Clearance is reported per axis in that axis' own unit scale; the
+    // overlay carries no units_per_mm, so use the HPGL standard 40/mm here —
+    // every plotter in the registry is within a rounding error of it.
+    cl = clearanceMm(docRect, ov.effArea, kHpglUnitsPerMm, kHpglUnitsPerMm);
+  }
+  const bool overruns = haveDoc && !cl.fits();
+
+  // Paper sheet — outermost, drawn first so the plot rectangles sit on top.
+  if (ov.showPaper && ov.hasPaper) {
+    ScreenRect sr = project(ov.paper);
+    // A faint fill reads as "sheet" without washing out the artwork; the
+    // overlay is composited over the cached canvas texture.
+    dl->AddConvexPolyFilled(sr.c, 4, IM_COL32(255, 255, 255, 26));
+    strokeRect(dl, sr, IM_COL32(210, 210, 205, 200), 1.5f, !ov.paperVerified);
+
+    char cap[128];
+    if (ov.paperVerified)
+      snprintf(cap, sizeof(cap), "%s  paper", ov.label.c_str());
+    else
+      snprintf(cap, sizeof(cap), "%s  paper (offset unverified)",
+               ov.label.c_str());
+    // Anchor to the sheet's top-left corner in HPGL terms (index 3).
+    dl->AddText({sr.c[3].x + 4.f, sr.c[3].y + 4.f},
+                IM_COL32(225, 225, 220, 220), cap);
+  }
+
+  // Machine maximum — the pen physically cannot go outside this.
+  {
+    ScreenRect sr = project(ov.maxArea);
+    strokeRect(dl, sr, IM_COL32(120, 160, 230, 150), 1.f, false);
+  }
+
+  // Effective plot area — the rectangle a drawing must stay within.  Only
+  // worth drawing separately when a margin actually insets it.
+  const bool marginDiffers =
+      ov.effArea.x  != ov.maxArea.x  || ov.effArea.y  != ov.maxArea.y ||
+      ov.effArea.x2 != ov.maxArea.x2 || ov.effArea.y2 != ov.maxArea.y2;
+
+  ScreenRect eff    = project(ov.effArea);
+  ImU32      effCol = overruns ? IM_COL32(235, 90, 70, 235)
+                               : IM_COL32(90, 200, 120, 220);
+  strokeRect(dl, eff, effCol, marginDiffers ? 2.f : 1.5f, false);
+
+  if (!haveDoc) return;
+
+  // Per-edge clearance readouts, placed just outside each edge of the
+  // effective area.  Edge order matches projectRect: 0 bottom, 1 right,
+  // 2 top, 3 left.
+  ImVec2 centre{(eff.c[0].x + eff.c[2].x) * 0.5f,
+                (eff.c[0].y + eff.c[2].y) * 0.5f};
+  const float vals[4] = {cl.bottom, cl.right, cl.top, cl.left};
+  for (int e = 0; e < 4; ++e) {
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%+.1f mm", vals[e]);
+    ImU32  col = vals[e] < 0.f ? IM_COL32(255, 120, 100, 245)
+                               : IM_COL32(150, 220, 170, 220);
+    ImVec2 sz  = ImGui::CalcTextSize(buf);
+    ImVec2 p   = edgeLabelPos(eff, e, centre, 14.f);
+    p.x -= sz.x * 0.5f;
+    p.y -= sz.y * 0.5f;
+    dl->AddRectFilled({p.x - 3.f, p.y - 1.f}, {p.x + sz.x + 3.f, p.y + sz.y + 1.f},
+                      IM_COL32(0, 0, 0, 130), 3.f);
+    dl->AddText(p, col, buf);
+  }
+}
+
 // ── Scene drawing ─────────────────────────────────────────────────────────────
 
 void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW, float canvasH,
@@ -586,6 +732,10 @@ void drawHpgl(ImDrawList *dl, ImVec2 origin, float canvasW, float canvasH,
 
   if (p.showCoords)
     drawCoordinateSystem(dl, origin, canvasW, canvasH, doc, p);
+
+  if (p.plotter)
+    drawPlotterOverlay(dl, origin, canvasW, canvasH, doc, *p.plotter,
+                       p.panX, p.panY, p.scale, p.rotation);
 
   // GPU pen-down strokes — one draw call per pen (up to 8 total).
   // In FBO mode the caller has already rendered them into an FBO; skip here.

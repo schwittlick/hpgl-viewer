@@ -12,6 +12,9 @@
 #include "imgui.h"
 #include "hpgl_parser.h"
 #include "hpgl_fix.h"
+#include "plotters.h"
+
+#include <string>
 
 // ── Pen styling ───────────────────────────────────────────────────────────────
 
@@ -127,6 +130,31 @@ struct CanvasFbo {
   void destroy();
 };
 
+// ── Plotter bounds overlay ────────────────────────────────────────────────────
+//
+// Rectangles in HPGL units, drawn over the canvas so a drawing can be checked
+// against the machine it will be plotted on.  All three are in the document's
+// own coordinate space, so no transform is applied beyond the usual view one.
+struct PlotterOverlay {
+  bool show      = false; // master switch — nothing is drawn when false
+  bool showPaper = false; // draw the sheet outline as well as the plot area
+  bool hasPaper  = false; // the selected plotter carries paper data at all
+  bool paperVerified = false; // false → sheet is drawn dashed as a guess
+
+  Rect maxArea;  // furthest the pen can reach
+  Rect effArea;  // maxArea inset by the plotter's margin
+  Rect paper;    // the physical sheet (only when hasPaper)
+
+  std::string label; // plotter name, captioned at the top-left of the sheet
+};
+
+// Draw the plotter/paper rectangles plus per-edge clearance readouts.  Edges
+// the document overruns are drawn and labelled in red.
+void drawPlotterOverlay(ImDrawList *dl, ImVec2 origin, float canvasW,
+                        float canvasH, const HpglDoc &doc,
+                        const PlotterOverlay &ov, float panX, float panY,
+                        float scale, float rotation);
+
 // ── Scene drawing ─────────────────────────────────────────────────────────────
 
 struct DrawParams {
@@ -137,6 +165,9 @@ struct DrawParams {
   const LayerStyle *layerStyles = nullptr; // per-layer overrides, indexed by layer
   int   layerCount = 0;
   bool  showCoords = false;
+  // Plotter/paper bounds overlay, or nullptr for none.  Drawn on the CPU
+  // alongside the grid, so it costs nothing on FBO-cached frames.
+  const PlotterOverlay *plotter = nullptr;
   // When non-zero, drawHpgl skips the GPU stroke + pen-up callbacks and
   // instead samples this OpenGL texture between the grid and the CPU-drawn
   // dot circles, so z-order matches the immediate path.

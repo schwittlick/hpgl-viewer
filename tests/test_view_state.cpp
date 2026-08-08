@@ -125,6 +125,44 @@ static void test_zero_width_doc_uses_min_size() {
   REQUIRE(nearlyEqual(vs.scale, 180.f));
 }
 
+// ── fitToBounds ───────────────────────────────────────────────────────────────
+
+static void test_fit_to_bounds_matches_fit_to_canvas() {
+  // The two must agree for the same rectangle — fitToCanvas delegates to it.
+  HpglDoc doc = makeDoc(100, 0, 200, 100);
+  ViewState a = fitToCanvas(200.f, 200.f, doc, 0.f);
+  ViewState b = fitToBounds(200.f, 200.f, 100, 0, 200, 100, 0.f);
+  REQUIRE(nearlyEqual(a.scale, b.scale));
+  REQUIRE(nearlyEqual(a.panX,  b.panX));
+  REQUIRE(nearlyEqual(a.panY,  b.panY));
+}
+
+static void test_fit_to_bounds_handles_negative_coords() {
+  // Plotter bounds are commonly centred on the origin.
+  ViewState vs = fitToBounds(200.f, 200.f, -100, -100, 100, 100, 0.f);
+  // span 200 → scale = 200/200 * 0.9 = 0.9; centre is the origin
+  REQUIRE(nearlyEqual(vs.scale, 0.9f));
+  REQUIRE(nearlyEqual(vs.panX, 100.f));
+  REQUIRE(nearlyEqual(vs.panY, 100.f));
+}
+
+static void test_fit_to_bounds_clamps_degenerate_rect() {
+  ViewState vs = fitToBounds(200.f, 200.f, 50, 50, 50, 50, 0.f);
+  REQUIRE(nearlyEqual(vs.scale, 180.f)); // w/h clamped to 1
+}
+
+static void test_fit_to_bounds_rotation_swaps_dims() {
+  // 200x50 rect in a 300x100 canvas: unrotated is width-limited,
+  // rotated 90° is height-limited.
+  ViewState vs0  = fitToBounds(300.f, 100.f, 0, 0, 200, 50, 0.f);
+  ViewState vs90 = fitToBounds(300.f, 100.f, 0, 0, 200, 50,
+                               static_cast<float>(M_PI_2));
+  // vs0:  effW=200, effH=50  → min(300/200, 100/50)*0.9 = 1.5*0.9 = 1.35
+  // vs90: effW=50,  effH=200 → min(300/50, 100/200)*0.9 = 0.5*0.9 = 0.45
+  REQUIRE(nearlyEqual(vs0.scale,  1.35f));
+  REQUIRE(nearlyEqual(vs90.scale, 0.45f));
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 int main() {
@@ -138,6 +176,10 @@ int main() {
   run("rotation 90 wide canvas",            test_rotation_90_wide_canvas);
   run("rotation 90 non-square canvas",      test_rotation_90_non_square_canvas);
   run("zero-width doc uses min size",       test_zero_width_doc_uses_min_size);
+  run("fitToBounds matches fitToCanvas",    test_fit_to_bounds_matches_fit_to_canvas);
+  run("fitToBounds handles negative coords",test_fit_to_bounds_handles_negative_coords);
+  run("fitToBounds clamps degenerate rect", test_fit_to_bounds_clamps_degenerate_rect);
+  run("fitToBounds rotation swaps dims",    test_fit_to_bounds_rotation_swaps_dims);
 
   printf("\n%d/%d passed\n", g_pass, g_pass + g_fail);
   return g_fail > 0 ? 1 : 0;

@@ -32,6 +32,13 @@ config_lib = static_library('hpgl_config',
   sources : ['src/config.cpp'],
   include_directories : include_directories('src'))
 
+# Where the bundled plotter registry lands on install, so the app can find it
+# without an environment variable.
+plotters_lib = static_library('hpgl_plotters',
+  sources : ['src/plotters.cpp'],
+  include_directories : include_directories('src'),
+  cpp_args : ['-DHPGL_DATADIR="' + get_option('prefix') / get_option('datadir') + '"'])
+
 view_lib = static_library('hpgl_view',
   sources : ['src/view_state.cpp'],
   link_with : parser_lib,
@@ -39,7 +46,7 @@ view_lib = static_library('hpgl_view',
 
 renderer_lib = static_library('hpgl_renderer',
   sources : ['src/renderer.cpp'],
-  link_with : [parser_lib, fix_lib],
+  link_with : [parser_lib, fix_lib, plotters_lib],
   include_directories : include_directories('src'),
   dependencies : [glfw_dep, gl_dep, imgui_dep])
 
@@ -51,7 +58,8 @@ export_png_lib = static_library('hpgl_export_png',
 
 executable('hpgl-viewer',
   sources : ['src/main.cpp'],
-  link_with : [parser_lib, fix_lib, config_lib, view_lib, renderer_lib, export_png_lib],
+  link_with : [parser_lib, fix_lib, config_lib, view_lib, plotters_lib,
+               renderer_lib, export_png_lib],
   include_directories : include_directories('src'),
   dependencies : [glfw_dep, gl_dep, imgui_dep, png_dep],
   install : true)
@@ -87,6 +95,14 @@ view_test_exe = executable('test_view_state',
 
 test('view state', view_test_exe)
 
+plotters_test_exe = executable('test_plotters',
+  sources : ['tests/test_plotters.cpp'],
+  link_with : plotters_lib,
+  include_directories : include_directories('src'))
+
+test('plotters', plotters_test_exe,
+  args : [meson.project_source_root() / 'data/plotters.json'])
+
 renderer_test_exe = executable('test_renderer',
   sources : ['tests/test_renderer.cpp'],
   link_with : [parser_lib, fix_lib, renderer_lib],
@@ -104,6 +120,9 @@ export_png_test_exe = executable('test_export_png',
 test('export png', export_png_test_exe)
 
 # ── Desktop integration ───────────────────────────────────────────────────────
+
+install_data('data/plotters.json',
+  install_dir : get_option('datadir') / 'hpgl-viewer')
 
 install_data('data/hpgl-viewer.desktop',
   install_dir : get_option('datadir') / 'applications')
