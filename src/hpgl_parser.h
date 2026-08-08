@@ -67,10 +67,16 @@ private:
   void handleLO(const std::string &params);
   void handleDI(const std::string &params);
   void handleSL(const std::string &params);
+  void handleES(const std::string &params);
   void handleDT(const std::string &raw);
   void handleCP(const std::string &params);
   void handleLB(const std::string &text);
   void resetLabelState();
+
+  // Text metrics, in plotter units, with ES applied.
+  float cellWidth() const { return 1.5f * charW; }         // one character cell
+  float extraAdvance() const { return esSpaces * cellWidth(); } // ES per char
+  float lineSpacing() const { return 2.f * charH * (1.f + esLines); }
 
   void ensureStroke();
   void updateBounds(float x, float y);
@@ -89,4 +95,7 @@ private:
   float slant = 0;                                    // SL (tangent)
   int labelOrigin = 1;                                // LO
   char labelTerm = kDefaultLabelTerm;                 // DT
+  // ES extra space, as fractions of the character cell width and of the
+  // baseline-to-baseline line spacing.  Negative values tighten the text.
+  float esSpaces = 0, esLines = 0;                    // ES
 };

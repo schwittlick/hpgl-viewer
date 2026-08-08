@@ -257,19 +257,20 @@ static void test_no_trailing_semicolon_parsed() {
 
 // ── Labels (LB and the labelling group) ──────────────────────────────────────
 
-// Scale from font design units to plotter units for a given SI width/height
-// (centimetres), mirroring what the parser does.
+// Scale from font design units to plotter units for a given SI width
+// (centimetres): the glyph box maps to the SI character width.
 static float labelSX(float wCm) {
-  return 1.5f * wCm * kUnitsPerCm / hpgl_font::kCellWidth;
+  return wCm * kUnitsPerCm / hpgl_font::kGlyphWidth;
 }
-// Width of a string as the parser advances the pen, in plotter units.
-// Control characters are not plotted and do not advance the pen.
+// Width of a string as the parser advances the pen, in plotter units.  The
+// stick font is fixed-pitch, so every printable character advances one cell
+// (1.5 × the SI width); control characters are not plotted and do not advance.
 static float labelWidth(const char *text, float wCm) {
-  float w = 0;
+  int n = 0;
   for (const char *p = text; *p; ++p)
     if (static_cast<unsigned char>(*p) >= ' ')
-      w += hpgl_font::glyph(static_cast<unsigned char>(*p)).advance;
-  return w * labelSX(wCm);
+      ++n;
+  return n * 1.5f * wCm * kUnitsPerCm;
 }
 
 static void test_lb_draws_glyph_strokes() {
@@ -286,7 +287,9 @@ static void test_lb_sits_on_the_baseline_at_the_current_position() {
   auto doc = parse("PA1000,2000;LBH\x03");
   REQUIRE(approx(doc.minY, 2000.f));
   REQUIRE(approx(doc.maxY, 2000.f + kDefaultCharH));
-  REQUIRE(doc.minX > 1000.f); // left side bearing
+  // Fixed-width glyphs fill their box, so 'H' starts flush at the pen.
+  REQUIRE(approx(doc.minX, 1000.f));
+  REQUIRE(approx(doc.maxX, 1000.f + kDefaultCharW));
 }
 
 static void test_si_sets_character_height() {
@@ -361,7 +364,7 @@ static void test_lo3_hangs_the_label_below_the_current_position() {
   auto doc = parse("SI0.5,1.0;LO3;PA0,0;LBH\x03");
   REQUIRE(approx(doc.maxY, 0.f));
   REQUIRE(approx(doc.minY, -1.0f * kUnitsPerCm));
-  REQUIRE(doc.minX > 0.f); // still left-aligned
+  REQUIRE(approx(doc.minX, 0.f)); // still left-aligned
 }
 
 static void test_lo7_right_aligns_the_label() {
@@ -376,7 +379,7 @@ static void test_lo7_right_aligns_the_label() {
 static void test_lo_out_of_range_falls_back_to_lo1() {
   auto doc = parse("SI0.5,1.0;LO99;PA0,0;LBH\x03");
   REQUIRE(approx(doc.minY, 0.f));
-  REQUIRE(doc.minX > 0.f);
+  REQUIRE(approx(doc.minX, 0.f));
 }
 
 static void test_di_rotates_the_label() {
@@ -384,24 +387,26 @@ static void test_di_rotates_the_label() {
   auto doc = parse("SI0.5,1.0;DI0,1;PA0,0;LBH\x03");
   REQUIRE(approx(doc.minX, -1.0f * kUnitsPerCm)); // cap height now runs -x
   REQUIRE(approx(doc.maxX, 0.f));                 // baseline stays at x = 0
-  REQUIRE(doc.minY > 0.f);                        // advance runs along +y
+  REQUIRE(approx(doc.minY, 0.f));                 // advance runs along +y
+  REQUIRE(approx(doc.maxY, 0.5f * kUnitsPerCm));  // one character wide
 }
 
 static void test_di_without_params_restores_horizontal_text() {
   auto doc = parse("SI0.5,1.0;DI0,1;DI;PA0,0;LBH\x03");
   REQUIRE(approx(doc.maxY, 1.0f * kUnitsPerCm));
-  REQUIRE(doc.minX > 0.f);
+  REQUIRE(approx(doc.minX, 0.f));
 }
 
 static void test_sl_slants_the_glyph_top_forward() {
   auto upright = parse("SI0.5,1.0;PA0,0;LBI\x03");
   auto slanted = parse("SI0.5,1.0;SL1;PA0,0;LBI\x03");
-  // 'I' is a single vertical stem; slanting shifts its top by the height.
-  auto &s = slanted.strokes[0].points;
+  // 'I' is a serifed stem; its middle stroke is the vertical, and slanting
+  // shifts that stroke's top by the character height.
+  auto &s = slanted.strokes[1].points;
   const float dx = std::fabs(s.front().x - s.back().x);
   REQUIRE(approx(dx, 1.0f * kUnitsPerCm));
-  REQUIRE(approx(upright.strokes[0].points.front().x,
-                 upright.strokes[0].points.back().x));
+  REQUIRE(approx(upright.strokes[1].points.front().x,
+                 upright.strokes[1].points.back().x));
 }
 
 static void test_lb_newline_starts_a_new_line() {
@@ -459,11 +464,84 @@ static void test_cp_without_params_is_a_carriage_return_line_feed() {
   REQUIRE(approx(p.y, -2 * 1.0f * kUnitsPerCm));
 }
 
+static void test_font_is_fixed_pitch() {
+  // The stick font advances one character cell per character regardless of
+  // glyph shape, so a narrow label and a wide one of the same length end at
+  // exactly the same place.
+  auto narrow = parse("SI0.5,1.0;PA0,0;LBiii\x03PD;");
+  auto wide   = parse("SI0.5,1.0;PA0,0;LBmmm\x03PD;");
+  const float expect = 3 * 1.5f * 0.5f * kUnitsPerCm;
+  REQUIRE(approx(narrow.strokes.back().points[0].x, expect));
+  REQUIRE(approx(wide.strokes.back().points[0].x, expect));
+}
+
+static void test_glyphs_stay_inside_their_character_cell() {
+  // SI sizes the character, not the cell, so even the widest glyph must fit
+  // within the cell it is drawn in.
+  auto doc = parse("SI0.5,1.0;PA0,0;LBm\x03");
+  REQUIRE(doc.maxX - doc.minX <= 1.5f * 0.5f * kUnitsPerCm);
+}
+
+static void test_es_widens_the_space_between_characters() {
+  // ES 0.5 adds half a character cell after every character, so a 3-character
+  // label ends 1.5 cells further along than it would without it.
+  auto doc = parse("SI0.5,1.0;ES0.5;PA0,0;LBABC\x03PD;");
+  const float cell = 1.5f * 0.5f * kUnitsPerCm;
+  REQUIRE(approx(doc.strokes.back().points[0].x,
+                 labelWidth("ABC", 0.5f) + 3 * 0.5f * cell));
+}
+
+static void test_es_negative_spaces_tightens_the_label() {
+  auto doc = parse("SI0.5,1.0;ES-0.3;PA0,0;LBABC\x03PD;");
+  const float cell = 1.5f * 0.5f * kUnitsPerCm;
+  REQUIRE(approx(doc.strokes.back().points[0].x,
+                 labelWidth("ABC", 0.5f) - 3 * 0.3f * cell));
+}
+
+static void test_es_lines_scales_the_line_spacing() {
+  // Baselines are normally 2 character heights apart; ES ,-0.25 pulls them to
+  // 75% of that.  LO1 anchors the bottom line, so the block grows upward by
+  // one line feed plus a cap height.
+  auto doc = parse("SI0.5,1.0;ES0,-0.25;PA0,0;LBH\nH\x03");
+  const float h = 1.0f * kUnitsPerCm;
+  REQUIRE(approx(doc.minY, 0.f));
+  REQUIRE(approx(doc.maxY, 0.75f * 2 * h + h));
+}
+
+static void test_es_lines_scales_cp_line_feeds() {
+  auto doc = parse("SI0.5,1.0;ES0,-0.25;PA0,0;CP0,-1;PD;");
+  REQUIRE(approx(doc.strokes.back().points[0].y,
+                 -0.75f * 2.f * 1.0f * kUnitsPerCm));
+}
+
+static void test_es_spaces_scales_cp_character_cells() {
+  // A CP character cell is the cell width plus the ES extra space.
+  auto doc = parse("SI0.5,1.0;ES0.5;PA0,0;CP2,0;PD;");
+  const float cell = 1.5f * 0.5f * kUnitsPerCm;
+  REQUIRE(approx(doc.strokes.back().points[0].x, 2 * 1.5f * cell));
+}
+
+static void test_es_without_params_restores_default_spacing() {
+  auto doc = parse("SI0.5,1.0;ES0.5,0.5;ES;PA0,0;LBABC\x03PD;");
+  REQUIRE(approx(doc.strokes.back().points[0].x, labelWidth("ABC", 0.5f)));
+}
+
+static void test_es_omitted_lines_parameter_is_zero() {
+  // ES with only `spaces` leaves no extra line spacing, even if a previous ES
+  // set one.
+  auto doc = parse("SI0.5,1.0;ES0,0.5;ES0.5;PA0,0;LBH\nH\x03");
+  const float h = 1.0f * kUnitsPerCm;
+  REQUIRE(approx(doc.maxY, 2 * h + h)); // default 2h line feed, not 3h
+}
+
 static void test_in_resets_the_label_state() {
-  auto doc = parse("SI1.0,2.0;LO5;DI0,1;IN;PA0,0;LBH\x03");
+  auto doc = parse("SI1.0,2.0;LO5;DI0,1;ES1,1;IN;PA0,0;LBH\x03PD;");
   REQUIRE(approx(doc.minY, 0.f));                     // LO back to 1
   REQUIRE(approx(doc.maxY, kDefaultCharH));           // SI back to default
-  REQUIRE(doc.minX > 0.f);                            // DI back to horizontal
+  REQUIRE(approx(doc.minX, 0.f));                     // LO back to 1
+  // DI back to horizontal and ES back to zero: the pen advances along +x by
+  // exactly one character cell.
+  REQUIRE(approx(doc.strokes.back().points[0].x, 1.5f * kDefaultCharW));
 }
 
 static void test_parser_reuse_resets_label_state() {
@@ -570,6 +648,15 @@ int main() {
   run("LB does not extend pen-down stroke", test_lb_does_not_extend_a_pen_down_stroke);
   run("CP moves pen by character cells",    test_cp_moves_the_pen_by_character_cells);
   run("CP no params is CR+LF",              test_cp_without_params_is_a_carriage_return_line_feed);
+  run("stick font is fixed-pitch",          test_font_is_fixed_pitch);
+  run("glyphs fit their character cell",    test_glyphs_stay_inside_their_character_cell);
+  run("ES widens character spacing",        test_es_widens_the_space_between_characters);
+  run("ES negative spaces tightens label",  test_es_negative_spaces_tightens_the_label);
+  run("ES lines scales line spacing",       test_es_lines_scales_the_line_spacing);
+  run("ES lines scales CP line feeds",      test_es_lines_scales_cp_line_feeds);
+  run("ES spaces scales CP cells",          test_es_spaces_scales_cp_character_cells);
+  run("ES no params restores spacing",      test_es_without_params_restores_default_spacing);
+  run("ES omitted lines param is zero",     test_es_omitted_lines_parameter_is_zero);
   run("IN resets label state",              test_in_resets_the_label_state);
   run("parser reuse resets label state",    test_parser_reuse_resets_label_state);
   run("progress reaches 1.0 after parse",   test_progress_reaches_one_after_parse);

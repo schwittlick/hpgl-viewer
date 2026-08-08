@@ -119,6 +119,18 @@ export_png_test_exe = executable('test_export_png',
 
 test('export png', export_png_test_exe)
 
+# The label font table is generated but checked in, so nothing in the build
+# regenerates it. This guards against tools/stick_font.json and the generated
+# src/hpgl_font.cpp drifting apart.
+python3 = find_program('python3', required : false)
+if python3.found()
+  test('font generated', python3,
+    args : [meson.project_source_root() / 'tests/test_font_generated.py',
+            meson.project_source_root() / 'tools/gen_hpgl_font.py',
+            meson.project_source_root() / 'tools/stick_font.json',
+            meson.project_source_root() / 'src/hpgl_font.cpp'])
+endif
+
 # ── Desktop integration ───────────────────────────────────────────────────────
 
 install_data('data/plotters.json',

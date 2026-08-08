@@ -115,6 +115,8 @@ void HpglParser::resetLabelState() {
   slant = 0;
   labelOrigin = 1;
   labelTerm   = kDefaultLabelTerm;
+  esSpaces = 0;
+  esLines  = 0;
 }
 
 // SI width,height — absolute character size in centimetres.  No parameters
@@ -157,6 +159,16 @@ void HpglParser::handleSL(const std::string &params) {
   slant = v.empty() ? 0.f : v[0];
 }
 
+// ES spaces[,lines] — extra space between characters and between lines.
+// `spaces` is a fraction of the character cell width, `lines` a fraction of the
+// baseline-to-baseline spacing; both may be negative to tighten the text.
+// Omitted parameters are zero, so a bare ES restores the default spacing.
+void HpglParser::handleES(const std::string &params) {
+  auto v = parseCoords(params);
+  esSpaces = v.size() >= 1 ? v[0] : 0.f;
+  esLines  = v.size() >= 2 ? v[1] : 0.f;
+}
+
 // DT c[,mode] — redefine the LB terminator.  The parameter is taken raw: it
 // may be any printable character, including whitespace.
 void HpglParser::handleDT(const std::string &raw) {
@@ -172,8 +184,8 @@ void HpglParser::handleCP(const std::string &params) {
     spaces = v[0];
     lines  = v[1];
   }
-  const float along = spaces * 1.5f * charW;
-  const float up    = lines * 2.f * charH;
+  const float along = spaces * (cellWidth() + extraAdvance());
+  const float up    = lines * lineSpacing();
   cx += along * dirX - up * dirY;
   cy += along * dirY + up * dirX;
   curIdx = -1;
@@ -181,9 +193,13 @@ void HpglParser::handleCP(const std::string &params) {
 
 // LB text — draw text with the plotter's stick font.
 void HpglParser::handleLB(const std::string &text) {
-  const float cellW = 1.5f * charW;  // HP-GL character cell width
-  const float lineH = 2.f * charH;   // line-to-line spacing
-  const float sx = cellW / hpgl_font::kCellWidth;
+  const float cellW = cellWidth();     // HP-GL character cell width
+  const float lineH = lineSpacing();   // line-to-line spacing, incl. ES
+  // The stick font is fixed-width: every character is drawn in the same box
+  // and advances one cell, whatever its shape.  SI gives the size of that box,
+  // so the glyph maps to charW × charH and the rest of the cell is the gap.
+  const float advance = cellW + extraAdvance();
+  const float sx = charW / hpgl_font::kGlyphWidth;
   const float sy = charH / hpgl_font::kCapHeight;
 
   // Font-unit → page transform.  `along` runs in the label direction, `up`
@@ -202,7 +218,7 @@ void HpglParser::handleLB(const std::string &text) {
       lineWidths.push_back(width);
       width = 0;
     } else if (ch >= ' ') {
-      width += hpgl_font::glyph(ch).advance * sx;
+      width += advance;
     }
   }
   lineWidths.push_back(width);
@@ -256,7 +272,7 @@ void HpglParser::handleLB(const std::string &text) {
         addPoint(p.x, p.y);
       }
     }
-    along += g.advance * sx;
+    along += advance;
   }
 
   // The pen ends up where the next character would start.
@@ -332,6 +348,7 @@ HpglDoc HpglParser::parse(const std::string &content,
     else if (c0 == 'L' && c1 == 'O') handleLO(params);
     else if (c0 == 'D' && c1 == 'I') handleDI(params);
     else if (c0 == 'S' && c1 == 'L') handleSL(params);
+    else if (c0 == 'E' && c1 == 'S') handleES(params);
     else if (c0 == 'C' && c1 == 'P') handleCP(params);
     else if (c0 == 'D' && c1 == 'T') handleDT(raw);
     else if ((c0 == 'I' && c1 == 'N') || (c0 == 'D' && c1 == 'F'))
